@@ -14,7 +14,7 @@
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击 [安装脚本]([链接到你的脚本发布地址](https://github.com/Kelly4git/FindKeyword.git))
+2. 点击 [安装脚本](https://github.com/Kelly4git/FindKeyword.git)
 
 ## 使用方法
 
