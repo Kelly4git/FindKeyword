@@ -72,6 +72,17 @@ const CONFIG = {
 // 添加一个用于存储最新匹配结果的全局变量
 let latestMatchResults = null;
 
+// 在顶层添加 createNumberRegex 函数
+function createNumberRegex(number) {
+    // 处理数字前后可能出现的字符类型
+    return new RegExp(
+        // (?<!) 和 (?<=[^]) 是零宽负向后发断言
+        // (?!) 和 (?=[^]) 是零宽负向前发断言
+        `(?<!\\d)(?<!\\.)${number}(?!\\d)(?!\\.)`,
+        'g'
+    );
+}
+
 (function() {
     'use strict';
 
@@ -216,7 +227,24 @@ let latestMatchResults = null;
 
         dialog.innerHTML = `
             <h3>设置关键词</h3>
-            <textarea class="keywords-textarea" placeholder="请输入关键词，每行一个">${getKeywords().join('\n')}</textarea>
+            <div style="margin-bottom: 10px; font-size: 12px; color: #666;">
+                <p>支持以下格式：</p>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>普通文本：直接输入要匹配的文字</li>
+                    <li>数字：输入纯数字将精确匹配</li>
+                    <li>正则表达式：使用 /pattern/flags 格式</li>
+                </ul>
+                <p>正则表达式示例：</p>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>/\\d+/g - 匹配连续数字</li>
+                    <li>/[a-zA-Z]+/gi - 匹配连续字母</li>
+                    <li>/\\w+@\\w+\\.\\w+/g - 匹配邮箱格式</li>
+                </ul>
+            </div>
+            <textarea class="keywords-textarea" placeholder="请输入关键词，每行一个
+普通文本：直接输入
+数字：123
+正则：/pattern/gi">${getKeywords().join('\n')}</textarea>
             <div style="text-align: right">
                 <button class="cancel-btn">取消</button>
                 <button class="save-btn">保存</button>
@@ -263,84 +291,217 @@ let latestMatchResults = null;
         };
     }
 
-    // 修改导出功能，使用HTML格式
-    function exportMatchedElements() {
-        if (!latestMatchResults || Object.keys(latestMatchResults).length === 0) {
-            alert('当前没有匹配结果可导出');
-            return;
+    // 添加一个新函数用于提取正则表达式匹配的内容
+    function extractMatches(content, keyword) {
+        let matches = [];
+        let regex;
+
+        // 检查是否是正则表达式格式
+        if (keyword.startsWith('/') && keyword.length > 2) {
+            const lastSlashIndex = keyword.lastIndexOf('/');
+            if (lastSlashIndex > 0) {
+                const pattern = keyword.slice(1, lastSlashIndex);
+                const flags = keyword.slice(lastSlashIndex + 1);
+                try {
+                    regex = new RegExp(pattern, flags);
+                } catch (e) {
+                    console.warn(`Invalid regex pattern: ${keyword}`);
+                    return matches;
+                }
+            }
         }
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `关键词匹配结果_${timestamp}.html`;
+        // 如果不是正则表达式，使用普通文本匹配
+        if (!regex) {
+            const isNumber = /^\d+(\.\d+)?$/.test(keyword);
+            if (isNumber) {
+                regex = createNumberRegex(keyword); // 现在可以正确调用这个函数
+            } else {
+                regex = new RegExp(
+                    keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                    'gi'
+                );
+            }
+        }
 
-        let content = `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>关键词匹配结果导出</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .keyword-section { margin-bottom: 30px; }
-        .keyword-header { background: #f0f0f0; padding: 10px; margin-bottom: 15px; }
-        .match-item { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; }
-        .match-content { background: #f8f8f8; padding: 10px; margin: 10px 0; }
-        .match-xpath { font-family: monospace; word-break: break-all; }
-        .match-html { background: #f5f5f5; padding: 10px; margin-top: 10px; overflow-x: auto; }
-    </style>
-</head>
-<body>
-    <h1>关键词匹配结果</h1>
-    <p>导出时间: ${new Date().toLocaleString()}</p>
-`;
-
-        Object.entries(latestMatchResults).forEach(([keyword, elements]) => {
-            content += `
-    <div class="keyword-section">
-        <div class="keyword-header">
-            <h2>关键词: ${keyword}</h2>
-            <p>匹配次数: ${elements.length}</p>
-        </div>
-`;
-
-            elements.forEach((elem, index) => {
-                content += `
-        <div class="match-item">
-            <h3>[${index + 1}] 元素信息:</h3>
-            <p>类型: ${elem.element.tagName || '文本节点'}</p>
-            <div class="match-content">
-                <strong>内容:</strong><br>${elem.content.trim()}
-            </div>
-`;
-                if (elem.element.id) {
-                    content += `            <p>ID: ${elem.element.id}</p>\n`;
-                }
-                if (elem.element.className) {
-                    content += `            <p>类名: ${elem.element.className}</p>\n`;
-                }
-                content += `
-            <p class="match-xpath">XPath: ${getXPath(elem.element)}</p>
-            <pre class="match-html">完整HTML:\n${elem.element.outerHTML || elem.element.textContent}</pre>
-        </div>
-`;
+        // 使用正则表达式的 exec 方法循环提取所有匹配
+        let match;
+        while ((match = regex.exec(content)) !== null) {
+            matches.push({
+                text: match[0],
+                index: match.index,
+                groups: match.groups || {},
+                // 保存捕获组信息
+                captures: match.slice(1)
             });
-            content += `    </div>\n`;
-        });
+        }
 
-        content += `
-</body>
-</html>`;
+        return matches;
+    }
 
-        const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
+    // 修改 exportMatchedElements 函数
+    function exportMatchedElements() {
+        try {
+            if (!latestMatchResults || Object.keys(latestMatchResults).length === 0) {
+                alert('当前没有匹配结果可导出');
+                return;
+            }
 
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+            // 在发送到 Worker 前预处理数据
+            const processedResults = {};
+            for (const [keyword, elements] of Object.entries(latestMatchResults)) {
+                processedResults[keyword] = elements.map(elem => ({
+                    content: elem.content,
+                    tagName: elem.element.tagName || '',
+                    type: elem.element.type || '',
+                    className: elem.element.className || '',
+                    id: elem.element.id || ''
+                }));
+            }
+
+            // 创建 Worker 代码
+            const workerBlob = new Blob([`
+                self.onmessage = function(e) {
+                    const { processedResults, timestamp } = e.data;
+                    let content = [];
+
+                    content.push(\`<!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <title>关键词匹配结果导出</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .keyword-section { margin-bottom: 30px; }
+            .keyword-header { background: #f0f0f0; padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+            .match-item { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
+            .match-content { background: #f8f8f8; padding: 10px; margin: 10px 0; border-radius: 4px; word-break: break-word; }
+        </style>
+    </head>
+    <body>
+        <h1>关键词匹配结果</h1>
+        <p>导出时间: \${new Date(timestamp).toLocaleString()}</p>\`);
+
+                    // 逐个处理关键词和匹配结果
+                    for (const [keyword, elements] of Object.entries(processedResults)) {
+                        content.push(\`<div class="keyword-section">
+        <div class="keyword-header">
+            <h2>关键词: \${escapeHtml(keyword)}</h2>
+            <p>匹配次数: \${elements.length}</p>
+        </div>\`);
+
+                        // 分批处理元素
+                        let batchContent = [];
+                        for (let i = 0; i < elements.length; i++) {
+                            const elem = elements[i];
+                            batchContent.push(\`
+        <div class="match-item">
+            <h3>匹配项 [\${i + 1}]</h3>
+            <div class="match-content">
+                <strong>内容:</strong><br>\${escapeHtml(elem.content)}
+            </div>
+            <p>元素信息:</p>
+            <ul>
+                <li>类型: \${escapeHtml(elem.tagName.toLowerCase())}</li>
+                \${elem.type ? '<li>输入类型: ' + escapeHtml(elem.type) + '</li>' : ''}
+                \${elem.className ? '<li>类名: ' + escapeHtml(elem.className) + '</li>' : ''}
+                \${elem.id ? '<li>ID: ' + escapeHtml(elem.id) + '</li>' : ''}
+            </ul>
+        </div>\`);
+
+                            // 每处理 50 个元素就发送一次进度更新
+                            if (i % 50 === 0) {
+                                content.push(batchContent.join(''));
+                                batchContent = [];
+                                self.postMessage({
+                                    type: 'progress',
+                                    progress: Math.round((i / elements.length) * 100)
+                                });
+                            }
+                        }
+
+                        // 处理剩余的元素
+                        if (batchContent.length > 0) {
+                            content.push(batchContent.join(''));
+                        }
+                        content.push('</div>');
+                    }
+
+                    content.push('</body></html>');
+
+                    // 发送完成的 HTML 内容
+                    self.postMessage({
+                        type: 'complete',
+                        content: content.join('\\n')
+                    });
+                };
+
+                function escapeHtml(unsafe) {
+                    return (unsafe || '')
+                        .toString()
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/'/g, "&#039;");
+                }
+            `], { type: 'text/javascript' });
+
+            const worker = new Worker(URL.createObjectURL(workerBlob));
+
+            // 创建进度提示
+            const progressDiv = document.createElement('div');
+            progressDiv.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                z-index: 10000;
+                text-align: center;
+            `;
+            progressDiv.innerHTML = '正在处理数据: 0%';
+            document.body.appendChild(progressDiv);
+
+            // 处理 Worker 消息
+            worker.onmessage = function(e) {
+                if (e.data.type === 'progress') {
+                    progressDiv.innerHTML = `正在处理数据: ${e.data.progress}%`;
+                } else if (e.data.type === 'complete') {
+                    document.body.removeChild(progressDiv);
+
+                    // 分块下载大文件
+                    const blob = new Blob([e.data.content], { type: 'text/html;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `关键词匹配结果_${new Date().toISOString().replace(/[:.]/g, '-')}.html`;
+                    document.body.appendChild(a);
+                    a.click();
+
+                    // 清理资源
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        worker.terminate();
+                        URL.revokeObjectURL(workerBlob);
+                    }, 100);
+                }
+            };
+
+            // 发送预处理后的数据给 Worker
+            worker.postMessage({
+                processedResults,
+                timestamp: Date.now()
+            });
+
+        } catch (error) {
+            console.error('导出过程中发生错误:', error);
+            alert('导出过程中发生错误，请查看控制台获取详细信息');
+        }
     }
 
     // 获取元素的XPath
@@ -584,18 +745,6 @@ let latestMatchResults = null;
             return textContent.trim();
         }
 
-        // 在 updateCounter 函数中修改数字匹配的正则表达式
-        function createNumberRegex(number) {
-            // 处理数字前后可能出现的字符类型
-            return new RegExp(
-                // (?<!) 和 (?<=[^]) 是零宽负向后发断言
-                // (?!) 和 (?=[^]) 是零宽负向前发断言
-                // \p{Unified_Ideograph} 匹配任何中文字符
-                `(?<!\\d)(?<!\\.)${number}(?!\\d)(?!\\.)`,
-                'g'
-            );
-        }
-
         // 清除之前的匹配标记
         document.querySelectorAll('[data-matched]').forEach(elem => {
             elem.removeAttribute('data-matched');
@@ -624,16 +773,36 @@ let latestMatchResults = null;
                 keywords.forEach(keyword => {
                     if (!keyword) return;
 
-                    const isNumber = /^\d+(\.\d+)?$/.test(keyword);
                     let regex;
+                    // 检查是否是正则表达式格式 (以/开头和结尾)
+                    if (keyword.startsWith('/') && keyword.length > 2) {
+                        const lastSlashIndex = keyword.lastIndexOf('/');
+                        if (lastSlashIndex > 0) {
+                            const pattern = keyword.slice(1, lastSlashIndex);
+                            const flags = keyword.slice(lastSlashIndex + 1);
+                            if (isValidRegExp(pattern)) {
+                                try {
+                                    regex = new RegExp(pattern, flags);
+                                } catch (e) {
+                                    console.warn(`Invalid regex pattern: ${keyword}`);
+                                    return;
+                                }
+                            }
+                        }
+                    }
 
-                    if (isNumber) {
-                        regex = createNumberRegex(keyword);
-                    } else {
-                        regex = new RegExp(
-                            keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-                            'gi'
-                        );
+                    // 如果不是有效的正则表达式，检查是否是数字
+                    if (!regex) {
+                        const isNumber = /^\d+(\.\d+)?$/.test(keyword);
+                        if (isNumber) {
+                            regex = createNumberRegex(keyword);
+                        } else {
+                            // 普通关键词，转义特殊字符
+                            regex = new RegExp(
+                                keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                                'gi'
+                            );
+                        }
                     }
 
                     const matches = content.match(regex);
@@ -735,6 +904,16 @@ let latestMatchResults = null;
         if (counter.innerHTML !== newContent) {
             counter.innerHTML = newContent;
             latestMatchResults = matchedElements;
+        }
+    }
+
+    // 在 createNumberRegex 函数后添加新的正则表达式验证函数
+    function isValidRegExp(pattern) {
+        try {
+            new RegExp(pattern);
+            return true;
+        } catch (e) {
+            return false;
         }
     }
 
