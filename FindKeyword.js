@@ -125,7 +125,7 @@ function mergeOverlappingMatches(matches) {
             }
         }
     }
-    
+
     if (currentMatch) {
         mergedMatches.push(currentMatch);
     }
@@ -216,8 +216,8 @@ function mergeOverlappingMatches(matches) {
             position: fixed !important;
             right: 2vh !important;
             bottom: 2vh !important;
-            width: 10vh !important;
-            height: 10vh !important;
+            width: 6vh !important;
+            height: 6vh !important;
             border-radius: 50% !important;
             background: rgba(255, 255, 0, 0.8) !important;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
@@ -225,7 +225,7 @@ function mergeOverlappingMatches(matches) {
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
-            font-size: 1.5vh !important;
+            font-size: 14px !important;
             line-height: 1.5 !important;
             text-align: center !important;
             z-index: 2147483647 !important;
@@ -239,7 +239,7 @@ function mergeOverlappingMatches(matches) {
         .match-results {
             position: fixed !important;
             right: 20px !important;
-            bottom: calc(12vh + 20px) !important;
+            bottom: calc(10vh + 20px) !important;
             min-width: 200px !important;
             max-width: 80vw !important;
             padding: 10px 15px !important;
@@ -247,7 +247,7 @@ function mergeOverlappingMatches(matches) {
             background: rgba(255, 255, 0, 0.8) !important;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
             z-index: 2147483646 !important;
-            font-size: 14px !important;
+            font-size: 16px !important;
             line-height: 1.5 !important;
             max-height: 70vh !important;
             overflow-y: auto !important;
@@ -285,13 +285,13 @@ function mergeOverlappingMatches(matches) {
         mark:hover {
             transform: scale(1.02) !important;
             box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
-        } 
+        }
     `);
 
     // 修改清理文本函数，只清理不可见字符
     function cleanText(text) {
         return text
-            // 清理所有空白字符（空格、制表符、换页符、换行符等）
+        // 清理所有空白字符（空格、制表符、换页符、换行符等）
             .replace(/[\s\uFEFF\xA0]+/g, '')
             .trim();
     }
@@ -339,19 +339,14 @@ function mergeOverlappingMatches(matches) {
                 <ul style="margin: 5px 0; padding-left: 20px;">
                     <li>普通文本：直接输入要匹配的文字</li>
                     <li>数字：输入纯数字将精确匹配</li>
-                    <li>正则表达式：使用 /pattern/flags 格式</li>
                 </ul>
-                <p>正则表达式示例：</p>
-                <ul style="margin: 5px 0; padding-left: 20px;">
-                    <li>/\\d+/g - 匹配连续数字</li>
-                    <li>/[a-zA-Z]+/gi - 匹配连续字母</li>
-                    <li>/\\w+@\\w+\\.\\w+/g - 匹配邮箱格式</li>
-                </ul>
+                <p>每行输入一个关键词</p>
             </div>
             <textarea class="keywords-textarea" placeholder="请输入关键词，每行一个
-普通文本：直接输入
-数字：123
-正则：/pattern/gi">${getKeywords().join('\n')}</textarea>
+示例：
+关键词1
+123
+关键词2">${getKeywords().join('\n')}</textarea>
             <div style="text-align: right">
                 <button class="cancel-btn">取消</button>
                 <button class="save-btn">保存</button>
@@ -407,46 +402,30 @@ function mergeOverlappingMatches(matches) {
     // 添加一个新函数用于提取正则表达式匹配的内容
     function extractMatches(content, keyword) {
         let matches = [];
-        let regex;
 
-        // 检查是否是正则表达式格式
-        if (keyword.startsWith('/') && keyword.length > 2) {
-            const lastSlashIndex = keyword.lastIndexOf('/');
-            if (lastSlashIndex > 0) {
-                const pattern = keyword.slice(1, lastSlashIndex);
-                const flags = keyword.slice(lastSlashIndex + 1);
-                try {
-                    regex = new RegExp(pattern, flags);
-                } catch (e) {
-                    console.warn(`Invalid regex pattern: ${keyword}`);
-                    return matches;
-                }
+        // 检查是否是数字
+        const isNumber = /^\d+(\.\d+)?$/.test(keyword);
+        if (isNumber) {
+            // 使用数字精确匹配
+            const regex = createNumberRegex(keyword);
+            let match;
+            while ((match = regex.exec(content)) !== null) {
+                matches.push({
+                    text: match[0],
+                    index: match.index
+                });
             }
-        }
-
-        // 如果不是正则表达式，使用普通文本匹配
-        if (!regex) {
-            const isNumber = /^\d+(\.\d+)?$/.test(keyword);
-            if (isNumber) {
-                regex = createNumberRegex(keyword); // 现在可以正确调用这个函数
-            } else {
-                regex = new RegExp(
-                    keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-                    'gi'
-                );
+        } else {
+            // 普通文本匹配
+            let index = 0;
+            let searchText = content;
+            while ((index = searchText.indexOf(keyword, index)) > -1) {
+                matches.push({
+                    text: keyword,
+                    index: index
+                });
+                index += keyword.length;
             }
-        }
-
-        // 使用正则表达式的 exec 方法循环提取所有匹配
-        let match;
-        while ((match = regex.exec(content)) !== null) {
-            matches.push({
-                text: match[0],
-                index: match.index,
-                groups: match.groups || {},
-                // 保存捕获组信息
-                captures: match.slice(1)
-            });
         }
 
         return matches;
@@ -481,7 +460,7 @@ function mergeOverlappingMatches(matches) {
             const processNextBatch = async () => {
                 // 创建元素到关键词的映射
                 const elementMap = new Map();
-                
+
                 // 收集每个元素的所有关键词匹配
                 for (const [keyword, elements] of Object.entries(latestMatchResults)) {
                     elements.forEach(elem => {
@@ -499,7 +478,7 @@ function mergeOverlappingMatches(matches) {
 
                 const batchSize = 50;
                 let content = [];
-                
+
                 content.push(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -509,8 +488,8 @@ function mergeOverlappingMatches(matches) {
         body { font-family: Arial, sans-serif; margin: 20px; }
         .element-section { margin-bottom: 30px; background: #fff; border: 1px solid #eee; border-radius: 8px; }
         .element-header { background: #f8f9fa; padding: 15px; border-bottom: 1px solid #eee; border-radius: 8px 8px 0 0; }
-        .match-content { 
-            background: #fff; 
+        .match-content {
+            background: #fff;
             padding: 15px;
             margin: 0;
             word-break: break-word;
@@ -530,9 +509,9 @@ function mergeOverlappingMatches(matches) {
             border-radius: 12px;
             font-size: 14px;
         }
-        mark { 
-            background-color: #fff3cd; 
-            padding: 0 2px; 
+        mark {
+            background-color: #fff3cd;
+            padding: 0 2px;
             border-radius: 2px;
             display: inline-block;
         }
@@ -655,28 +634,28 @@ function mergeOverlappingMatches(matches) {
 
             // 按优先级获取值
             return element.getAttribute('ng-reflect-model') || // Angular 绑定值
-                   element.getAttribute('value') ||            // 原生值
-                   element.value ||                           // 当前值
-                   element.textContent ||                     // 文本内容
-                   '';
+                element.getAttribute('value') ||            // 原生值
+                element.value ||                           // 当前值
+                element.textContent ||                     // 文本内容
+                '';
         }
 
         // 处理禁用状态的输入框
         if (element.classList.contains('ant-input-disabled') ||
             element.hasAttribute('disabled')) {
             return element.value ||
-                   element.getAttribute('value') ||
-                   element.textContent ||
-                   '';
+                element.getAttribute('value') ||
+                element.textContent ||
+                '';
         }
 
         // 处理只读状态的输入框
         if (element.hasAttribute('readonly') ||
             element.classList.contains('ant-input-readonly')) {
             return element.value ||
-                   element.getAttribute('value') ||
-                   element.textContent ||
-                   '';
+                element.getAttribute('value') ||
+                element.textContent ||
+                '';
         }
 
         // 处理表单元素
@@ -686,8 +665,8 @@ function mergeOverlappingMatches(matches) {
             if (element.hasAttribute('nz-input')) {
                 // 优先获取绑定值
                 return element.getAttribute('ng-reflect-model') ||
-                       element.value ||
-                       element.defaultValue || '';
+                    element.value ||
+                    element.defaultValue || '';
             }
             if (element.type !== 'hidden' &&
                 element.type !== 'submit' &&
@@ -860,14 +839,14 @@ function mergeOverlappingMatches(matches) {
 
         dialog.querySelector('.save-btn').addEventListener('click', () => {
             const includeDomains = dialog.querySelector('#include-domains').value
-                .split('\n')
-                .map(d => d.trim())
-                .filter(Boolean);
+            .split('\n')
+            .map(d => d.trim())
+            .filter(Boolean);
 
             const excludeDomains = dialog.querySelector('#exclude-domains').value
-                .split('\n')
-                .map(d => d.trim())
-                .filter(Boolean);
+            .split('\n')
+            .map(d => d.trim())
+            .filter(Boolean);
 
             saveDomains(includeDomains, excludeDomains);
             closeDialog();
@@ -888,15 +867,15 @@ function mergeOverlappingMatches(matches) {
 
         // 在排除列表中则不运行
         if (exclude.some(domain =>
-            currentDomain === domain ||
-            currentDomain.endsWith('.' + domain)
-        )) return false;
+                         currentDomain === domain ||
+                         currentDomain.endsWith('.' + domain)
+                        )) return false;
 
         // 有包含列表时必须匹配
         return !include.length || include.some(domain =>
-            currentDomain === domain ||
-            currentDomain.endsWith('.' + domain)
-        );
+                                               currentDomain === domain ||
+                                               currentDomain.endsWith('.' + domain)
+                                              );
     }
 
     // 修改启动逻辑相关函数
@@ -905,7 +884,7 @@ function mergeOverlappingMatches(matches) {
         const trigger = document.createElement('div');
         trigger.className = 'match-trigger';
         trigger.setAttribute('data-script-element', 'true');
-        trigger.innerHTML = '查看关键词'; // 初始文本
+        trigger.innerHTML = '查看<br>关键词'; // 初始文本
         document.body.appendChild(trigger);
 
         // 创建结果显示区域（初始隐藏）
@@ -919,19 +898,19 @@ function mergeOverlappingMatches(matches) {
             if (isResultsVisible) {
                 // 隐藏结果
                 results.style.display = 'none';
-                trigger.innerHTML = '查看关键词';
+                trigger.innerHTML = '查看<br>关键词';
                 isResultsVisible = false;
             } else {
                 // 强制刷新匹配结果缓存
                 matchResultsCache = null;
                 highlightCache.clear();
-                
+
                 // 执行新的匹配
                 await executeMatch();
-                
+
                 // 更新并显示结果
                 await updateMatchResults();
-                
+
                 // 设置结果浮层样式
                 results.style.cssText = `
                     display: block;
@@ -945,12 +924,12 @@ function mergeOverlappingMatches(matches) {
                     background: rgba(255, 255, 255, 0.95);
                     box-shadow: 0 2px 10px rgba(0,0,0,0.2);
                     z-index: 2147483646;
-                    font-size: 14px;
+                    font-size: 16px;
                     line-height: 1.5;
                     max-height: 70vh;
                     overflow-y: auto;
                 `;
-                trigger.innerHTML = '隐藏关键词';
+                trigger.innerHTML = '隐藏<br>关键词';
                 isResultsVisible = true;
             }
         });
@@ -981,10 +960,8 @@ function mergeOverlappingMatches(matches) {
         if (!results) return;
 
         try {
-            // 清除原有的事件监听器
             results.removeEventListener('click', handleKeywordClick);
-            
-            // 如果没有缓存结果，执行匹配
+
             if (!matchResultsCache) {
                 await executeMatch();
             }
@@ -994,24 +971,12 @@ function mergeOverlappingMatches(matches) {
                 return;
             }
 
-            // 生成显示内容
             const matchedResults = [];
             for (const [keyword, elements] of Object.entries(matchResultsCache)) {
                 if (elements.length > 0) {
-                    // 处理正则表达式关键词
-                    let displayKeyword = keyword;
-                    if (keyword.startsWith('/') && keyword.length > 2) {
-                        const actualMatches = new Set();
-                        elements.forEach(elem => {
-                            const matches = extractMatches(elem.content, keyword);
-                            matches.forEach(match => actualMatches.add(match.text));
-                        });
-                        displayKeyword = Array.from(actualMatches).join(', ');
-                    }
-
                     matchedResults.push(`
                         <div class="match-item">
-                            <span class="keyword" data-keyword="${keyword}">${escapeHtml(displayKeyword)}</span>：
+                            <span class="keyword" data-keyword="${escapeHtml(keyword)}">${escapeHtml(keyword)}</span>：
                             出现 <span class="count">${elements.length}</span> 次
                         </div>
                     `);
@@ -1020,12 +985,9 @@ function mergeOverlappingMatches(matches) {
 
             results.innerHTML = matchedResults.length > 0 ?
                 matchedResults.join('') :
-                '未找到匹配结果';
+            '未找到匹配结果';
 
-            // 添加关键词点击事件处理
             results.addEventListener('click', handleKeywordClick);
-            
-            // 显示结果
             results.style.display = 'block';
         } catch (error) {
             console.error('更新匹配结果时发生错误:', error);
@@ -1111,7 +1073,7 @@ function mergeOverlappingMatches(matches) {
         try {
             // 执行匹配逻辑
             updateCounter();
-            
+
             // 将匹配结果保存到缓存
             matchResultsCache = latestMatchResults;
 
@@ -1186,92 +1148,25 @@ function mergeOverlappingMatches(matches) {
             return highlightCache.get(cacheKey);
         }
 
-        // 收集所有匹配结果并按长度降序排序
-        const allMatches = [];
-        
-        // 先按关键词长度降序排序，确保长的关键词优先匹配
-        const sortedKeywords = Array.from(keywordsMap.entries())
-            .sort((a, b) => b[0].length - a[0].length);
+        let highlightedContent = escapeHtml(content);
 
-        // 处理每个关键词
-        sortedKeywords.forEach(([keyword, matches], index) => {
+        // 按关键词长度降序排序，确保长的关键词优先匹配
+        const sortedKeywords = Array.from(keywordsMap.keys())
+        .sort((a, b) => b.length - a.length);
+
+        sortedKeywords.forEach((keyword, index) => {
             const colorClass = `keyword-${(index % 5) + 1}`;
-            const keywordMatches = extractMatches(content, keyword);
-            keywordMatches.forEach(match => {
-                allMatches.push({
-                    ...match,
-                    colorClass,
-                    keyword,
-                    length: match.text.length,
-                    end: match.index + match.text.length
-                });
+            const matches = extractMatches(content, keyword);
+
+            // 从后向前替换以避免位置偏移
+            matches.sort((a, b) => b.index - a.index).forEach(match => {
+                const escapedMatch = escapeHtml(match.text);
+                const before = highlightedContent.substring(0, match.index);
+                const after = highlightedContent.substring(match.index + match.text.length);
+                highlightedContent = `${before}<mark class="${colorClass}">${escapedMatch}</mark>${after}`;
             });
         });
 
-        // 合并重叠的匹配
-        const mergedMatches = [];
-        const marked = new Set();
-
-        // 按起始位置和长度排序
-        allMatches.sort((a, b) => {
-            if (a.index === b.index) {
-                return b.length - a.length; // 相同位置，长的优先
-            }
-            return a.index - b.index;
-        });
-
-        // 处理重叠匹配
-        for (const match of allMatches) {
-            const matchRange = `${match.index}-${match.end}`;
-            
-            // 检查是否与任何已处理的匹配重叠
-            let shouldAdd = true;
-            for (const range of marked) {
-                const [start, end] = range.split('-').map(Number);
-                
-                // 完全包含或被包含
-                if ((match.index >= start && match.end <= end) ||
-                    (start >= match.index && end <= match.end)) {
-                    // 如果当前匹配更长，替换已有的
-                    if (match.length > (end - start)) {
-                        marked.delete(range);
-                    } else {
-                        shouldAdd = false;
-                    }
-                    break;
-                }
-                
-                // 部分重叠
-                if ((match.index < end && match.end > start) ||
-                    (start < match.end && end > match.index)) {
-                    // 选择更长的匹配
-                    if (match.length > (end - start)) {
-                        marked.delete(range);
-                    } else {
-                        shouldAdd = false;
-                    }
-                    break;
-                }
-            }
-
-            if (shouldAdd) {
-                marked.add(matchRange);
-                mergedMatches.push(match);
-            }
-        }
-
-        // 对内容进行HTML转义
-        let highlightedContent = escapeHtml(content);
-        
-        // 从后向前应用高亮，避免位置偏移
-        mergedMatches.sort((a, b) => b.index - a.index).forEach(match => {
-            const before = highlightedContent.substring(0, match.index);
-            const after = highlightedContent.substring(match.index + match.text.length);
-            
-            highlightedContent = `${before}<mark class="keyword-1">${match.text}</mark>${after}`;
-        });
-
-        // 保存到缓存
         highlightCache.set(cacheKey, highlightedContent);
         return highlightedContent;
     }
