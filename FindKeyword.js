@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         网页关键词匹配计数工具
+// @name         网页关键词查询工具高级版
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  统计表单中关键词的匹配次数
@@ -47,10 +47,21 @@ const FORM_SELECTORS = {
         'figcaption',
         'blockquote',
         'cite'
+    ].join(','),
+    angularInputs: [
+        '[nz-input]',
+        '[formControlName]',
+        '[ng-reflect-model]',
+        '[ng-model]',
+        '.ant-input',
+        '.ng-untouched',
+        '.ng-pristine',
+        'nz-form-control',
+        'nz-form-label'
     ].join(',')
 };
 
-// 在 FORM_SELECTORS 常量后添加新的配置常量
+// 将配置常量合并和简化
 const CONFIG = {
     STORAGE_KEYS: {
         INCLUDE_DOMAINS: 'includeDomains',
@@ -93,9 +104,9 @@ let latestMatchResults = null;
         .match-counter {
             position: fixed !important;
             right: 20px !important;
-            bottom: 2vh !important;
+            bottom: 0vh !important;
             padding: 10px 15px !important;
-            border-radius: 6px !重要;
+            border-radius: 6px !important;
             z-index: 2147483647 !important;
             font-size: 14px !important;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
@@ -103,9 +114,9 @@ let latestMatchResults = null;
             white-space: nowrap !important;
             max-height: 70vh !important;
             overflow-y: auto !important;
-            overflow-x: hidden !重要;
+            overflow-x: hidden !important;
             pointer-events: auto !important; /* 允许点击 */
-            background: rgba(255, 255, 0, 0.5) !important;
+            background: rgba(255, 255, 0, 0.8) !important;
         }
         .match-counter .count {
             color: #ff0000 !important;
@@ -119,11 +130,46 @@ let latestMatchResults = null;
             border-radius: 4px !important;
             cursor: pointer !important;
             font-size: 12px !important;
-            margin-top: 8px !重要;
-            width: 100% !重要;
+            margin-top: 8px !important;
+            width: 100% !important;
         }
         .export-btn:hover {
-            background: #45a049 !重要;
+            background: #45a049 !important;
+        }
+        .match-counter .keyword {
+            cursor: pointer;
+            text-decoration: underline;
+            color: #0066cc;
+            margin-right: 5px;
+        }
+        .match-counter .keyword:hover {
+            color: #003366;
+        }
+        .highlight-match {
+            background-color: #ffeb3b;
+            outline: 2px solid #ffc107;
+        }
+         /* 添加过渡效果 */
+        .highlight-match {
+            transition: background-color 0.3s ease-out, outline 0.3s ease-out;
+        }
+        /* 表单元素高亮样式 */
+        input.highlight-match,
+        textarea.highlight-match,
+        [contenteditable].highlight-match,
+        [nz-input].highlight-match,
+        .ant-input.highlight-match {
+            background-color: #fff3cd !important;
+            border-color: #ffc107 !important;
+            box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25) !important;
+            outline: none !important;
+            transition: all 0.3s ease-out !important;
+        }
+
+        /* 普通元素高亮样式保持不变 */
+        .highlight-match:not(input):not(textarea):not([contenteditable]):not([nz-input]):not(.ant-input) {
+            background-color: #ffeb3b !important;
+            outline: 2px solid #ffc107 !important;
         }
     `);
 
@@ -329,6 +375,79 @@ let latestMatchResults = null;
         return '/' + paths.join('/');
     }
 
+    // 修改 getTextContent 函数对 Angular 元素的处理
+    function getTextContent(element) {
+        // Angular 表单元素特殊处理
+        if (element.hasAttribute('nz-input') ||
+            element.classList.contains('ant-input') ||
+            element.hasAttribute('formControlName')) {
+
+            // 按优先级获取值
+            return element.getAttribute('ng-reflect-model') || // Angular 绑定值
+                   element.getAttribute('value') ||            // 原生值
+                   element.value ||                           // 当前值
+                   element.textContent ||                     // 文本内容
+                   '';
+        }
+
+        // 处理禁用状态的输入框
+        if (element.classList.contains('ant-input-disabled') ||
+            element.hasAttribute('disabled')) {
+            return element.value ||
+                   element.getAttribute('value') ||
+                   element.textContent ||
+                   '';
+        }
+
+        // 处理只读状态的输入框
+        if (element.hasAttribute('readonly') ||
+            element.classList.contains('ant-input-readonly')) {
+            return element.value ||
+                   element.getAttribute('value') ||
+                   element.textContent ||
+                   '';
+        }
+
+        // 处理表单元素
+        if (element instanceof HTMLInputElement ||
+            element instanceof HTMLTextAreaElement) {
+            // 检查是否是 ng-zorro 输入框
+            if (element.hasAttribute('nz-input')) {
+                // 优先获取绑定值
+                return element.getAttribute('ng-reflect-model') ||
+                       element.value ||
+                       element.defaultValue || '';
+            }
+            if (element.type !== 'hidden' &&
+                element.type !== 'submit' &&
+                element.type !== 'button' &&
+                element.type !== 'reset') {
+                return element.value || element.defaultValue || '';
+            }
+            return '';
+        }
+
+        // 处理可编辑元素
+        if (element.isContentEditable) {
+            return element.innerText || '';
+        }
+
+        // 获取元素的所有直接文本内容，不包括子元素的文本
+        let textContent = '';
+        const childNodes = element.childNodes;
+        for (let i = 0; i < childNodes.length; i++) {
+            const node = childNodes[i];
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent.trim();
+                if (text) {
+                    textContent += text + ' ';
+                }
+            }
+        }
+
+        return textContent.trim();
+    }
+
     // 修改更新计数器显示函数
     function updateCounter() {
         const keywords = getKeywords();
@@ -377,7 +496,8 @@ let latestMatchResults = null;
                 'input[type="password"]',
                 FORM_SELECTORS.textAreas,
                 FORM_SELECTORS.contentEditable,
-                FORM_SELECTORS.textContainers
+                FORM_SELECTORS.textContainers,
+                FORM_SELECTORS.angularInputs  // 添加 Angular 选择器
             ].filter(Boolean).join(',')
         );
 
@@ -481,11 +601,20 @@ let latestMatchResults = null;
             elem.removeAttribute('data-matched');
         });
 
+        // 创建一个 Set 来存储已处理的 XPath
+        const processedPaths = new Set();
+
         // 修改元素处理逻辑
         allTextElements.forEach(element => {
             // 跳过计数器和对话框元素
             if (element.closest('.match-counter') ||
                 element.closest('.keywords-dialog')) {
+                return;
+            }
+
+            const elementPath = getXPath(element);
+            // 检查此路径是否已处理过
+            if (processedPaths.has(elementPath)) {
                 return;
             }
 
@@ -519,10 +648,13 @@ let latestMatchResults = null;
                     }
                 });
 
-                // 如果元素有匹配，标记该元素已匹配
+                // 如果元素有匹配，标记该元素但不影响其他元素
                 if (hasMatch) {
                     element.setAttribute('data-matched', 'true');
                 }
+
+                // 记录已处理的路径
+                processedPaths.add(elementPath);
             }
         });
 
@@ -577,12 +709,25 @@ let latestMatchResults = null;
 
         let newContent;
         if (matchedKeywords.length > 0) {
-            // 只显示匹配次数，移除导出按钮
             newContent = matchedKeywords
-                .map(keyword => `${keyword}：出现 <span class="count">${matchCounts[keyword]}</span> 次`)
+                .map(keyword => `
+                    <span>
+                        <span class="keyword" data-keyword="${keyword}">${keyword}</span>：
+                        出现 <span class="count">${matchCounts[keyword]}</span> 次
+                    </span>
+                `)
                 .join('；<br>');
+
+            // 使用事件委托处理关键词点击
+            counter.addEventListener('click', (event) => {
+                const keywordElement = event.target.closest('.keyword');
+                if (keywordElement) {
+                    event.stopPropagation(); // 阻止冒泡，防止触发文档点击事件
+                    const keyword = keywordElement.getAttribute('data-keyword');
+                    findAndHighlight(keyword);
+                }
+            });
         } else {
-            // 没有匹配时显示提示文本
             newContent = '未匹配到关键词';
         }
 
@@ -592,6 +737,80 @@ let latestMatchResults = null;
             latestMatchResults = matchedElements;
         }
     }
+
+    // 修改 findAndHighlight 函数
+    function findAndHighlight(keyword) {
+        // 如果是新关键词，重置搜索状态
+        if (currentSearchState.keyword !== keyword) {
+            currentSearchState.keyword = keyword;
+            currentSearchState.matches = [];
+            currentSearchState.currentIndex = -1;
+
+            // 移除之前的高亮
+            document.querySelectorAll('.highlight-match').forEach(el => {
+                el.classList.remove('highlight-match');
+            });
+
+            // 收集所有匹配的元素
+            if (latestMatchResults && latestMatchResults[keyword]) {
+                currentSearchState.matches = latestMatchResults[keyword].map(match => match.element);
+            }
+        }
+
+        // 移动到下一个匹配项
+        currentSearchState.currentIndex++;
+        if (currentSearchState.currentIndex >= currentSearchState.matches.length) {
+            currentSearchState.currentIndex = 0;
+        }
+
+        // 获取当前匹配元素
+        const currentMatch = currentSearchState.matches[currentSearchState.currentIndex];
+        if (currentMatch) {
+            // 移除之前的高亮和定时器
+            document.querySelectorAll('.highlight-match').forEach(el => {
+                el.classList.remove('highlight-match');
+                // 获取可能存在的旧定时器ID并清除
+                const timerId = el.getAttribute('data-highlight-timer');
+                if (timerId) {
+                    clearTimeout(parseInt(timerId));
+                    el.removeAttribute('data-highlight-timer');
+                }
+            });
+
+            // 判断是否是表单元素并添加高亮
+            if (currentMatch instanceof HTMLInputElement ||
+                currentMatch instanceof HTMLTextAreaElement ||
+                currentMatch.hasAttribute('contenteditable') ||
+                currentMatch.hasAttribute('nz-input') ||
+                currentMatch.classList.contains('ant-input')) {
+                currentMatch.classList.add('highlight-match');
+            } else {
+                currentMatch.classList.add('highlight-match');
+            }
+
+            // 滚动到可见位置
+            currentMatch.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+
+            // 设置新的定时器并保存ID
+            const timerId = setTimeout(() => {
+                currentMatch.classList.remove('highlight-match');
+                currentMatch.removeAttribute('data-highlight-timer');
+            }, 3000);
+
+            // 保存定时器ID
+            currentMatch.setAttribute('data-highlight-timer', timerId.toString());
+        }
+    }
+
+    // 添加全局变量用于跟踪当前搜索状态
+    let currentSearchState = {
+        keyword: null,
+        matches: [],
+        currentIndex: -1
+    };
 
     // 添加域名配置相关函数
     function saveDomains(includeList, excludeList) {
@@ -668,122 +887,127 @@ let latestMatchResults = null;
         document.body.appendChild(dialog);
     }
 
-    // 添加域名匹配检查函数
+    // 优化域名检查函数
     function shouldRunOnDomain() {
-        const domains = getDomains();
+        const { include, exclude } = getDomains();
         const currentDomain = window.location.hostname;
 
-        // 如果没有设置任何域名，则在所有网站运行
-        if (!domains.include.length && !domains.exclude.length) {
-            return true;
-        }
+        // 没有任何限制时允许运行
+        if (!include.length && !exclude.length) return true;
 
-        // 检查是否在排除列表中
-        if (domains.exclude.some(domain =>
+        // 在排除列表中则不运行
+        if (exclude.some(domain =>
             currentDomain === domain ||
             currentDomain.endsWith('.' + domain)
-        )) {
-            return false;
-        }
+        )) return false;
 
-        // 如果有包含列表，检查是否匹配
-        if (domains.include.length) {
-            return domains.include.some(domain =>
-                currentDomain === domain ||
-                currentDomain.endsWith('.' + domain)
-            );
-        }
-
-        return true;
+        // 有包含列表时必须匹配
+        return !include.length || include.some(domain =>
+            currentDomain === domain ||
+            currentDomain.endsWith('.' + domain)
+        );
     }
 
-    // 初始化
+    // 修改启动逻辑相关函数
     function init() {
-        // 注册菜单命令
-        GM_registerMenuCommand('⚙️ 设置关键词', createKeywordsDialog);
-        GM_registerMenuCommand('🌐 配置网站', createDomainDialog);
-        GM_registerMenuCommand('📥 导出匹配结果', exportMatchedElements);
-
-        // 确保初始化时就创建计数器
-        updateCounter();
-
-        // 监听表单变化
         const debouncedUpdate = debounce(updateCounter, 300);
-        const observer = new MutationObserver((mutations) => {
-            // 只在实际内容变化时更新
-            const shouldUpdate = mutations.some(mutation => {
-                // 仅当文本内容直接变化时
-                if (mutation.type === 'characterData') {
-                    return true;
-                }
 
-                // 仅当新增或删除了文本节点时
-                if (mutation.type === 'childList') {
-                    return [...mutation.addedNodes, ...mutation.removedNodes].some(
-                        node => node.nodeType === Node.TEXT_NODE
-                    );
-                }
+        // 定义可交互元素选择器
+        const interactiveSelectors = [
+            'button',
+            'a',
+            '[role="button"]',
+            '[role="tab"]',
+            '[role="menuitem"]',
+            '[role="option"]',
+            '.ant-btn',
+            '.ant-switch'
+        ].join(',');
 
-                // 仅当表单值变化时
-                if (mutation.type === 'attributes') {
-                    if (mutation.attributeName === 'value') {
-                        const target = mutation.target;
-                        if (target instanceof HTMLInputElement ||
-                            target instanceof HTMLTextAreaElement) {
-                            // 比较旧值和新值
-                            return target.value !== target._lastValue;
-                        }
-                    }
-                }
+        // 使用事件委托监听点击事件
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('.match-counter')) {
+                return;
+            }
 
-                return false;
+            const target = event.target;
+            const interactiveElement = target.matches(interactiveSelectors) ?
+                target : target.closest(interactiveSelectors);
+
+            if (interactiveElement) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        debouncedUpdate();
+                    });
+                });
+            }
+        }, { passive: true });
+
+        // 保留表单输入事件监听
+        document.body.addEventListener('input', (event) => {
+            const target = event.target;
+            if ((target instanceof HTMLInputElement ||
+                 target instanceof HTMLTextAreaElement) &&
+                !target.closest('.match-counter')) {
+                debouncedUpdate();
+            }
+        }, { passive: true });
+
+        // 直接执行一次更新，不使用防抖
+        updateCounter();
+    }
+
+    function checkAndInit() {
+        if (!shouldRunOnDomain()) return;
+
+        const menuCommands = {
+            '⚙️ 设置关键词': createKeywordsDialog,
+            '🌐 配置网站': createDomainDialog,
+            '📥 导出匹配结果': exportMatchedElements
+        };
+
+        Object.entries(menuCommands).forEach(([title, handler]) => {
+            GM_registerMenuCommand(title, handler);
+        });
+
+        // 修改初始化逻辑
+        function initAndUpdate() {
+            init();
+
+            // 监听动态内容变化
+            const observer = new MutationObserver(debounce(() => {
+                updateCounter();
+            }, 1000));
+
+            // 观察 document.body 的子树变化
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                characterData: true
+            });
+        }
+
+        // 分阶段执行初始化
+        if (document.readyState === 'complete') {
+            // 页面已完全加载
+            setTimeout(initAndUpdate, 1000);
+        } else {
+            // 等待 DOM 加载完成
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(initAndUpdate, 500);
             });
 
-            if (shouldUpdate) {
-                // 更新前保存当前表单值
-                mutations.forEach(mutation => {
-                    if (mutation.type === 'attributes' &&
-                        mutation.attributeName === 'value') {
-                        const target = mutation.target;
-                        if (target instanceof HTMLInputElement ||
-                            target instanceof HTMLTextAreaElement) {
-                            target._lastValue = target.value;
-                        }
-                    }
-                });
+            // 等待页面完全加载
+            window.addEventListener('load', () => {
+                setTimeout(initAndUpdate, 1000);
+            });
 
-                debouncedUpdate();
-            }
-        });
-
-        // 修改观察配置,移除样式相关监听
-        observer.observe(document.body, {
-            childList: true,       // 监听节点添加/删除
-            subtree: true,        // 监听所有后代节点
-            characterData: true,   // 监听文本内容变化
-            attributes: true,      // 监听属性变化
-            attributeFilter: ['value', 'textContent', 'innerText'], // 添加更多属性监听
-            characterDataOldValue: true // 保存文本变化的旧值
-        });
-
-        // 添加输入事件监听
-        document.addEventListener('input', (event) => {
-            const target = event.target;
-            if (target instanceof HTMLInputElement ||
-                target instanceof HTMLTextAreaElement) {
-                debouncedUpdate();
-            }
-        });
-    }
-
-    // 修改初始化检查函数
-    function checkAndInit() {
-        if (shouldRunOnDomain()) {
-            init();
+            // 额外等待动态内容
+            setTimeout(initAndUpdate, 2000);
         }
     }
 
-    // 启动脚本
+    // 修改启动脚本逻辑
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', checkAndInit);
     } else {
