@@ -69,6 +69,20 @@ const CONFIG = {
     }
 };
 
+// 在文件顶部的常量定义区域后添加
+
+// HTML转义函数
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe
+        .toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 // 添加一个用于存储最新匹配结果的全局变量
 let latestMatchResults = null;
 
@@ -81,6 +95,42 @@ function createNumberRegex(number) {
         `(?<!\\d)(?<!\\.)${number}(?!\\d)(?!\\.)`,
         'g'
     );
+}
+
+// 添加一个新的辅助函数来处理重叠匹配
+function mergeOverlappingMatches(matches) {
+    // 按起始位置排序所有匹配
+    const sortedMatches = matches.sort((a, b) => a.index - b.index);
+    const mergedMatches = [];
+    let currentMatch = null;
+
+    for (const match of sortedMatches) {
+        if (!currentMatch) {
+            currentMatch = { ...match };
+        } else {
+            // 检查是否重叠
+            if (match.index <= currentMatch.index + currentMatch.text.length) {
+                // 合并重叠部分
+                const endIndex = Math.max(
+                    currentMatch.index + currentMatch.text.length,
+                    match.index + match.text.length
+                );
+                currentMatch.text = match.text.substring(0, endIndex - match.index);
+                currentMatch.colorClasses = currentMatch.colorClasses || [];
+                currentMatch.colorClasses.push(match.colorClass);
+            } else {
+                // 没有重叠，保存当前匹配并开始新的匹配
+                mergedMatches.push(currentMatch);
+                currentMatch = { ...match };
+            }
+        }
+    }
+    
+    if (currentMatch) {
+        mergedMatches.push(currentMatch);
+    }
+
+    return mergedMatches;
 }
 
 (function() {
@@ -111,27 +161,6 @@ function createNumberRegex(number) {
             border-radius: 4px;
             resize: vertical;
             font-size: 14px;
-        }
-        .match-counter {
-            position: fixed !important;
-            right: 20px !important;
-            bottom: 0vh !important;
-            padding: 10px 15px !important;
-            border-radius: 6px !important;
-            z-index: 2147483647 !important;
-            font-size: 14px !important;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
-            line-height: 1.5 !important;
-            white-space: nowrap !important;
-            max-height: 70vh !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            pointer-events: auto !important; /* 允许点击 */
-            background: rgba(255, 255, 0, 0.8) !important;
-        }
-        .match-counter .count {
-            color: #ff0000 !important;
-            font-weight: bold !important;
         }
         .export-btn {
             background: #4CAF50 !important;
@@ -182,6 +211,81 @@ function createNumberRegex(number) {
             background-color: #ffeb3b !important;
             outline: 2px solid #ffc107 !important;
         }
+
+        .match-trigger {
+            position: fixed !important;
+            right: 2vh !important;
+            bottom: 2vh !important;
+            width: 10vh !important;
+            height: 10vh !important;
+            border-radius: 50% !important;
+            background: rgba(255, 255, 0, 0.8) !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+            cursor: pointer !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            font-size: 1.5vh !important;
+            line-height: 1.5 !important;
+            text-align: center !important;
+            z-index: 2147483647 !important;
+            transition: transform 0.3s ease !important;
+        }
+
+        .match-trigger:hover {
+            transform: scale(1.1) !important;
+        }
+
+        .match-results {
+            position: fixed !important;
+            right: 20px !important;
+            bottom: calc(12vh + 20px) !important;
+            min-width: 200px !important;
+            max-width: 80vw !important;
+            padding: 10px 15px !important;
+            border-radius: 6px !important;
+            background: rgba(255, 255, 0, 0.8) !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2) !important;
+            z-index: 2147483646 !important;
+            font-size: 14px !important;
+            line-height: 1.5 !important;
+            max-height: 70vh !important;
+            overflow-y: auto !important;
+            display: none; /* 移除 !important */
+        }
+
+        .match-results .match-item {
+            margin: 5px 0 !important;
+            padding: 5px !important;
+            border-bottom: 1px solid rgba(0,0,0,0.1) !important;
+        }
+
+        .match-results .match-item:last-child {
+            border-bottom: none !important;
+        }
+
+        .match-results .keyword {
+            color: #0066cc !important;
+            cursor: pointer !important;
+            text-decoration: underline !important;
+        }
+
+        .match-results .count {
+            color: #ff0000 !important;
+            font-weight: bold !important;
+        }
+
+        mark {
+            background-color: #ffecb3 !important;
+            padding: 2px 4px !important;
+            border-radius: 2px !important;
+            display: inline-block !important;
+            transition: all 0.3s ease !important;
+        }
+        mark:hover {
+            transform: scale(1.02) !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
+        } 
     `);
 
     // 修改清理文本函数，只清理不可见字符
@@ -195,6 +299,7 @@ function createNumberRegex(number) {
     // 关键词存储相关函数
     function saveKeywords(keywords) {
         GM_setValue('highlightKeywords', keywords.filter(k => k.length > 0));
+        highlightCache.clear(); // 清除缓存
     }
 
     function getKeywords() {
@@ -204,6 +309,7 @@ function createNumberRegex(number) {
     // 修改创建关键词设置对话框函数
     function createKeywordsDialog() {
         const overlay = document.createElement('div');
+        overlay.setAttribute('data-script-element', 'true');
         overlay.style.cssText = `
             position: fixed;
             top: 0;
@@ -216,6 +322,7 @@ function createNumberRegex(number) {
 
         const dialog = document.createElement('div');
         dialog.className = 'keywords-dialog';
+        dialog.setAttribute('data-script-element', 'true');
 
         // 创建取消函数
         const closeDialog = () => {
@@ -282,12 +389,18 @@ function createNumberRegex(number) {
         document.body.appendChild(dialog);
     }
 
-    // 防抖函数
-    function debounce(func, wait) {
+    // 优化 debounce 函数
+    function debounce(func, wait, immediate = false) {
         let timeout;
         return function(...args) {
+            const later = () => {
+                timeout = null;
+                if (!immediate) func.apply(this, args);
+            };
+            const callNow = immediate && !timeout;
             clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
+            timeout = setTimeout(later, wait);
+            if (callNow) func.apply(this, args);
         };
     }
 
@@ -339,7 +452,7 @@ function createNumberRegex(number) {
         return matches;
     }
 
-    // 修改 exportMatchedElements 函数
+    // 修改 exportMatchedElements 函数，增加匹配内容高亮功能
     function exportMatchedElements() {
         try {
             if (!latestMatchResults || Object.keys(latestMatchResults).length === 0) {
@@ -347,109 +460,7 @@ function createNumberRegex(number) {
                 return;
             }
 
-            // 在发送到 Worker 前预处理数据
-            const processedResults = {};
-            for (const [keyword, elements] of Object.entries(latestMatchResults)) {
-                processedResults[keyword] = elements.map(elem => ({
-                    content: elem.content,
-                    tagName: elem.element.tagName || '',
-                    type: elem.element.type || '',
-                    className: elem.element.className || '',
-                    id: elem.element.id || ''
-                }));
-            }
-
-            // 创建 Worker 代码
-            const workerBlob = new Blob([`
-                self.onmessage = function(e) {
-                    const { processedResults, timestamp } = e.data;
-                    let content = [];
-
-                    content.push(\`<!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8">
-        <title>关键词匹配结果导出</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .keyword-section { margin-bottom: 30px; }
-            .keyword-header { background: #f0f0f0; padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-            .match-item { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
-            .match-content { background: #f8f8f8; padding: 10px; margin: 10px 0; border-radius: 4px; word-break: break-word; }
-        </style>
-    </head>
-    <body>
-        <h1>关键词匹配结果</h1>
-        <p>导出时间: \${new Date(timestamp).toLocaleString()}</p>\`);
-
-                    // 逐个处理关键词和匹配结果
-                    for (const [keyword, elements] of Object.entries(processedResults)) {
-                        content.push(\`<div class="keyword-section">
-        <div class="keyword-header">
-            <h2>关键词: \${escapeHtml(keyword)}</h2>
-            <p>匹配次数: \${elements.length}</p>
-        </div>\`);
-
-                        // 分批处理元素
-                        let batchContent = [];
-                        for (let i = 0; i < elements.length; i++) {
-                            const elem = elements[i];
-                            batchContent.push(\`
-        <div class="match-item">
-            <h3>匹配项 [\${i + 1}]</h3>
-            <div class="match-content">
-                <strong>内容:</strong><br>\${escapeHtml(elem.content)}
-            </div>
-            <p>元素信息:</p>
-            <ul>
-                <li>类型: \${escapeHtml(elem.tagName.toLowerCase())}</li>
-                \${elem.type ? '<li>输入类型: ' + escapeHtml(elem.type) + '</li>' : ''}
-                \${elem.className ? '<li>类名: ' + escapeHtml(elem.className) + '</li>' : ''}
-                \${elem.id ? '<li>ID: ' + escapeHtml(elem.id) + '</li>' : ''}
-            </ul>
-        </div>\`);
-
-                            // 每处理 50 个元素就发送一次进度更新
-                            if (i % 50 === 0) {
-                                content.push(batchContent.join(''));
-                                batchContent = [];
-                                self.postMessage({
-                                    type: 'progress',
-                                    progress: Math.round((i / elements.length) * 100)
-                                });
-                            }
-                        }
-
-                        // 处理剩余的元素
-                        if (batchContent.length > 0) {
-                            content.push(batchContent.join(''));
-                        }
-                        content.push('</div>');
-                    }
-
-                    content.push('</body></html>');
-
-                    // 发送完成的 HTML 内容
-                    self.postMessage({
-                        type: 'complete',
-                        content: content.join('\\n')
-                    });
-                };
-
-                function escapeHtml(unsafe) {
-                    return (unsafe || '')
-                        .toString()
-                        .replace(/&/g, "&amp;")
-                        .replace(/</g, "&lt;")
-                        .replace(/>/g, "&gt;")
-                        .replace(/"/g, "&quot;")
-                        .replace(/'/g, "&#039;");
-                }
-            `], { type: 'text/javascript' });
-
-            const worker = new Worker(URL.createObjectURL(workerBlob));
-
-            // 创建进度提示
+            // 显示进度提示
             const progressDiv = document.createElement('div');
             progressDiv.style.cssText = `
                 position: fixed;
@@ -466,36 +477,135 @@ function createNumberRegex(number) {
             progressDiv.innerHTML = '正在处理数据: 0%';
             document.body.appendChild(progressDiv);
 
-            // 处理 Worker 消息
-            worker.onmessage = function(e) {
-                if (e.data.type === 'progress') {
-                    progressDiv.innerHTML = `正在处理数据: ${e.data.progress}%`;
-                } else if (e.data.type === 'complete') {
-                    document.body.removeChild(progressDiv);
-
-                    // 分块下载大文件
-                    const blob = new Blob([e.data.content], { type: 'text/html;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `关键词匹配结果_${new Date().toISOString().replace(/[:.]/g, '-')}.html`;
-                    document.body.appendChild(a);
-                    a.click();
-
-                    // 清理资源
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        worker.terminate();
-                        URL.revokeObjectURL(workerBlob);
-                    }, 100);
+            // 分批处理数据
+            const processNextBatch = async () => {
+                // 创建元素到关键词的映射
+                const elementMap = new Map();
+                
+                // 收集每个元素的所有关键词匹配
+                for (const [keyword, elements] of Object.entries(latestMatchResults)) {
+                    elements.forEach(elem => {
+                        const key = elem.element;
+                        if (!elementMap.has(key)) {
+                            elementMap.set(key, {
+                                content: elem.content,
+                                keywords: new Map(),
+                                element: elem.element
+                            });
+                        }
+                        elementMap.get(key).keywords.set(keyword, elem.matches);
+                    });
                 }
+
+                const batchSize = 50;
+                let content = [];
+                
+                content.push(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>关键词匹配结果导出</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .element-section { margin-bottom: 30px; background: #fff; border: 1px solid #eee; border-radius: 8px; }
+        .element-header { background: #f8f9fa; padding: 15px; border-bottom: 1px solid #eee; border-radius: 8px 8px 0 0; }
+        .match-content { 
+            background: #fff; 
+            padding: 15px;
+            margin: 0;
+            word-break: break-word;
+            line-height: 1.6;
+        }
+        .keywords-list {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .keyword-item {
+            display: inline-block;
+            margin: 2px 5px;
+            padding: 2px 8px;
+            background: #e9ecef;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+        mark { 
+            background-color: #fff3cd; 
+            padding: 0 2px; 
+            border-radius: 2px;
+            display: inline-block;
+        }
+        mark.keyword-1 { background-color: #ffecb3; }
+        mark.keyword-2 { background-color: #b3e5fc; }
+        mark.keyword-3 { background-color: #c8e6c9; }
+        mark.keyword-4 { background-color: #f8bbd0; }
+        mark.keyword-5 { background-color: #d1c4e9; }
+    </style>
+</head>
+<body>
+    <h1>关键词匹配结果导出</h1>
+    <p>导出时间: ${new Date().toLocaleString()}</p>`);
+
+                let processedCount = 0;
+                const totalElements = elementMap.size;
+
+                // 处理每个元素
+                for (const [element, data] of elementMap) {
+                    const highlightedContent = processHighlights(data.content, data.keywords);
+                    const keywordsList = Array.from(data.keywords.entries()).map(([keyword, matches]) => `
+                        <span class="keyword-item">${escapeHtml(keyword)} (${matches.length}次)</span>
+                    `);
+
+                    content.push(`
+                        <div class="element-section">
+                            <div class="element-header">
+                                <h3>元素信息</h3>
+                                <p>类型: ${escapeHtml(data.element.tagName.toLowerCase())}</p>
+                                ${data.element.type ? '<p>输入类型: ' + escapeHtml(data.element.type) + '</p>' : ''}
+                                ${data.element.className ? '<p>类名: ' + escapeHtml(data.element.className) + '</p>' : ''}
+                                ${data.element.id ? '<p>ID: ' + escapeHtml(data.element.id) + '</p>' : ''}
+                                <div class="keywords-list">
+                                    <strong>匹配的关键词：</strong>
+                                    ${keywordsList.join('')}
+                                </div>
+                            </div>
+                            <div class="match-content">${highlightedContent}</div>
+                        </div>
+                    `);
+
+                    processedCount++;
+                    if (processedCount % batchSize === 0) {
+                        const progress = Math.round((processedCount / totalElements) * 100);
+                        progressDiv.innerHTML = `正在处理数据: ${progress}%`;
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                }
+
+                content.push('</body></html>');
+
+                // 创建并下载文件
+                const blob = new Blob([content.join('\n')], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `关键词匹配结果_${new Date().toISOString().replace(/[:.]/g, '-')}.html`;
+                document.body.appendChild(a);
+                a.click();
+
+                // 清理
+                setTimeout(() => {
+                    document.body.removeChild(progressDiv);
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
             };
 
-            // 发送预处理后的数据给 Worker
-            worker.postMessage({
-                processedResults,
-                timestamp: Date.now()
+            // 开始处理
+            processNextBatch().catch(error => {
+                console.error('导出过程中发生错误:', error);
+                alert('导出过程中发生错误，请查看控制台获取详细信息');
+                document.body.removeChild(progressDiv);
             });
 
         } catch (error) {
@@ -607,304 +717,6 @@ function createNumberRegex(number) {
         }
 
         return textContent.trim();
-    }
-
-    // 修改更新计数器显示函数
-    function updateCounter() {
-        const keywords = getKeywords();
-        // 确保有关键词时才显示浮层
-        if (!keywords || !keywords.length) {
-            const counter = document.querySelector('.match-counter');
-            if (counter) {
-                counter.remove();
-            }
-            return;
-        }
-
-        // 创建或获取浮层
-        let counter = document.querySelector('.match-counter');
-        if (!counter) {
-            counter = document.createElement('div');
-            counter.className = 'match-counter';
-            document.body.appendChild(counter);
-
-            // 设置初始内容
-            counter.innerHTML = '正在统计...';
-        }
-
-        // 创建每个关键词的匹配统计
-        const matchCounts = {};
-        keywords.forEach(keyword => {
-            matchCounts[keyword] = 0;
-        });
-
-        // 添加匹配元素收集对象
-        const matchedElements = {};
-        keywords.forEach(keyword => {
-            matchedElements[keyword] = [];
-        });
-
-        // 获取所有文本元素，确保包含所有需要的选择器
-        const allTextElements = document.querySelectorAll(
-            [
-                // 明确列出所有需要的 input 类型
-                'input[type="text"]',
-                'input[type="search"]',
-                'input[type="email"]',
-                'input[type="tel"]',
-                'input[type="url"]',
-                'input[type="number"]',
-                'input[type="password"]',
-                FORM_SELECTORS.textAreas,
-                FORM_SELECTORS.contentEditable,
-                FORM_SELECTORS.textContainers,
-                FORM_SELECTORS.angularInputs  // 添加 Angular 选择器
-            ].filter(Boolean).join(',')
-        );
-
-        // 修改文本采集逻辑
-        function shouldSkipNode(node) {
-            // 跳过脚本、样式、注释节点
-            if (node.nodeType === Node.COMMENT_NODE ||
-                node.nodeName === 'SCRIPT' ||
-                node.nodeName === 'STYLE' ||
-                node.nodeName === 'META' ||
-                node.nodeName === 'LINK') {
-                return true;
-            }
-
-            // 不要跳过表单元素
-            if (node instanceof HTMLInputElement ||
-                node instanceof HTMLTextAreaElement ||
-                node.isContentEditable) {
-                return false;
-            }
-
-            // 跳过有特定属性的非表单节点
-            const skipAttributes = [
-                'onclick', 'onmouseover', 'onmouseout', 'onchange',
-                'data-', 'aria-', 'role', 'class', 'id', 'style',
-                'href', 'src', 'alt', 'title'
-            ];
-
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                for (let attr of skipAttributes) {
-                    if (attr.endsWith('-')) {
-                        // 检查以特定前缀开头的属性
-                        for (let nodeAttr of node.attributes) {
-                            if (nodeAttr.name.startsWith(attr)) {
-                                return true;
-                            }
-                        }
-                    } else if (node.hasAttribute(attr)) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        // 修改 getTextContent 函数以避免重复匹配
-        function getTextContent(element) {
-            // 如果元素的任何父元素已经被匹配过，则跳过
-            if (element.closest('[data-matched]')) {
-                return '';
-            }
-
-            // 处理表单元素
-            if (element instanceof HTMLInputElement ||
-                element instanceof HTMLTextAreaElement) {
-                if (element.type !== 'hidden' &&
-                    element.type !== 'submit' &&
-                    element.type !== 'button' &&
-                    element.type !== 'reset') {
-                    return element.value || element.defaultValue || '';
-                }
-                return '';
-            }
-
-            // 处理可编辑元素
-            if (element.isContentEditable) {
-                return element.innerText || '';
-            }
-
-            // 获取元素的所有直接文本内容，不包括子元素的文本
-            let textContent = '';
-            const childNodes = element.childNodes;
-            for (let i = 0; i < childNodes.length; i++) {
-                const node = childNodes[i];
-                if (node.nodeType === Node.TEXT_NODE) {
-                    const text = node.textContent.trim();
-                    if (text) {
-                        textContent += text + ' ';
-                    }
-                }
-            }
-
-            return textContent.trim();
-        }
-
-        // 清除之前的匹配标记
-        document.querySelectorAll('[data-matched]').forEach(elem => {
-            elem.removeAttribute('data-matched');
-        });
-
-        // 创建一个 Set 来存储已处理的 XPath
-        const processedPaths = new Set();
-
-        // 修改元素处理逻辑
-        allTextElements.forEach(element => {
-            // 跳过计数器和对话框元素
-            if (element.closest('.match-counter') ||
-                element.closest('.keywords-dialog')) {
-                return;
-            }
-
-            const elementPath = getXPath(element);
-            // 检查此路径是否已处理过
-            if (processedPaths.has(elementPath)) {
-                return;
-            }
-
-            const content = getTextContent(element);
-            if (content) {
-                let hasMatch = false;
-                keywords.forEach(keyword => {
-                    if (!keyword) return;
-
-                    let regex;
-                    // 检查是否是正则表达式格式 (以/开头和结尾)
-                    if (keyword.startsWith('/') && keyword.length > 2) {
-                        const lastSlashIndex = keyword.lastIndexOf('/');
-                        if (lastSlashIndex > 0) {
-                            const pattern = keyword.slice(1, lastSlashIndex);
-                            const flags = keyword.slice(lastSlashIndex + 1);
-                            if (isValidRegExp(pattern)) {
-                                try {
-                                    regex = new RegExp(pattern, flags);
-                                } catch (e) {
-                                    console.warn(`Invalid regex pattern: ${keyword}`);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    // 如果不是有效的正则表达式，检查是否是数字
-                    if (!regex) {
-                        const isNumber = /^\d+(\.\d+)?$/.test(keyword);
-                        if (isNumber) {
-                            regex = createNumberRegex(keyword);
-                        } else {
-                            // 普通关键词，转义特殊字符
-                            regex = new RegExp(
-                                keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-                                'gi'
-                            );
-                        }
-                    }
-
-                    const matches = content.match(regex);
-                    if (matches) {
-                        hasMatch = true;
-                        matchCounts[keyword] += matches.length;
-                        // 收集匹配元素
-                        matchedElements[keyword].push({
-                            element: element,
-                            content: content
-                        });
-                    }
-                });
-
-                // 如果元素有匹配，标记该元素但不影响其他元素
-                if (hasMatch) {
-                    element.setAttribute('data-matched', 'true');
-                }
-
-                // 记录已处理的路径
-                processedPaths.add(elementPath);
-            }
-        });
-
-        // 修改 TreeWalker 的节点过滤
-        const walker = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            {
-                acceptNode: function(node) {
-                    const parent = node.parentElement;
-                    if (!parent ||
-                        parent.nodeName === 'SCRIPT' ||
-                        parent.nodeName === 'STYLE' ||
-                        parent.closest('.match-counter') ||
-                        parent.closest('.keywords-dialog') ||
-                        parent.closest('[data-matched]')) { // 添加已匹配元素的检查
-                        return NodeFilter.FILTER_REJECT;
-                    }
-                    return NodeFilter.FILTER_ACCEPT;
-                }
-            }
-        );
-
-        while (walker.nextNode()) {
-            const text = walker.currentNode.textContent.trim();
-            if (text) {
-                keywords.forEach(keyword => {
-                    if (!keyword) return;
-
-                    const isNumber = /^\d+(\.\d+)?$/.test(keyword);
-                    let regex;
-
-                    if (isNumber) {
-                        regex = createNumberRegex(keyword);
-                    } else {
-                        regex = new RegExp(
-                            keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-                            'gi'
-                        );
-                    }
-
-                    const matches = text.match(regex);
-                    if (matches) {
-                        matchCounts[keyword] += matches.length;
-                    }
-                });
-            }
-        }
-
-        // 生成显示内容
-        const matchedKeywords = keywords.filter(keyword => matchCounts[keyword] > 0);
-
-        let newContent;
-        if (matchedKeywords.length > 0) {
-            newContent = matchedKeywords
-                .map(keyword => `
-                    <span>
-                        <span class="keyword" data-keyword="${keyword}">${keyword}</span>：
-                        出现 <span class="count">${matchCounts[keyword]}</span> 次
-                    </span>
-                `)
-                .join('；<br>');
-
-            // 使用事件委托处理关键词点击
-            counter.addEventListener('click', (event) => {
-                const keywordElement = event.target.closest('.keyword');
-                if (keywordElement) {
-                    event.stopPropagation(); // 阻止冒泡，防止触发文档点击事件
-                    const keyword = keywordElement.getAttribute('data-keyword');
-                    findAndHighlight(keyword);
-                }
-            });
-        } else {
-            newContent = '未匹配到关键词';
-        }
-
-        // 更新DOM并保存最新匹配结果
-        if (counter.innerHTML !== newContent) {
-            counter.innerHTML = newContent;
-            latestMatchResults = matchedElements;
-        }
     }
 
     // 在 createNumberRegex 函数后添加新的正则表达式验证函数
@@ -1089,51 +901,232 @@ function createNumberRegex(number) {
 
     // 修改启动逻辑相关函数
     function init() {
-        const debouncedUpdate = debounce(updateCounter, 300);
+        // 创建圆形触发器
+        const trigger = document.createElement('div');
+        trigger.className = 'match-trigger';
+        trigger.setAttribute('data-script-element', 'true');
+        trigger.innerHTML = '查看关键词'; // 初始文本
+        document.body.appendChild(trigger);
 
-        // 定义可交互元素选择器
-        const interactiveSelectors = [
-            'button',
-            'a',
-            '[role="button"]',
-            '[role="tab"]',
-            '[role="menuitem"]',
-            '[role="option"]',
-            '.ant-btn',
-            '.ant-switch'
-        ].join(',');
+        // 创建结果显示区域（初始隐藏）
+        const results = document.createElement('div');
+        results.className = 'match-results';
+        results.setAttribute('data-script-element', 'true');
+        document.body.appendChild(results);
 
-        // 使用事件委托监听点击事件
-        document.addEventListener('click', (event) => {
-            if (event.target.closest('.match-counter')) {
+        // 点击触发器的处理函数
+        trigger.addEventListener('click', async () => {
+            if (isResultsVisible) {
+                // 隐藏结果
+                results.style.display = 'none';
+                trigger.innerHTML = '查看关键词';
+                isResultsVisible = false;
+            } else {
+                // 强制刷新匹配结果缓存
+                matchResultsCache = null;
+                highlightCache.clear();
+                
+                // 执行新的匹配
+                await executeMatch();
+                
+                // 更新并显示结果
+                await updateMatchResults();
+                
+                // 设置结果浮层样式
+                results.style.cssText = `
+                    display: block;
+                    position: fixed;
+                    right: 20px;
+                    bottom: calc(12vh + 20px);
+                    min-width: 200px;
+                    max-width: 80vw;
+                    padding: 10px 15px;
+                    border-radius: 6px;
+                    background: rgba(255, 255, 255, 0.95);
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    z-index: 2147483646;
+                    font-size: 14px;
+                    line-height: 1.5;
+                    max-height: 70vh;
+                    overflow-y: auto;
+                `;
+                trigger.innerHTML = '隐藏关键词';
+                isResultsVisible = true;
+            }
+        });
+
+        // 添加 MutationObserver 监听页面变化
+        const observer = new MutationObserver(debounce(() => {
+            if (isResultsVisible) {
+                // 清除缓存以强制重新匹配
+                matchResultsCache = null;
+                updateMatchResults();
+            }
+        }, 1000));
+
+        // 配置 observer
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+
+        // 保存 observer 引用以便需要时清理
+        window._keywordMatchObserver = observer;
+    }
+
+    // 添加更新匹配结果的函数
+    async function updateMatchResults() {
+        const results = document.querySelector('.match-results');
+        if (!results) return;
+
+        try {
+            // 清除原有的事件监听器
+            results.removeEventListener('click', handleKeywordClick);
+            
+            // 如果没有缓存结果，执行匹配
+            if (!matchResultsCache) {
+                await executeMatch();
+            }
+
+            if (!matchResultsCache) {
+                results.innerHTML = '未找到匹配结果';
                 return;
             }
 
-            const target = event.target;
-            const interactiveElement = target.matches(interactiveSelectors) ?
-                target : target.closest(interactiveSelectors);
+            // 生成显示内容
+            const matchedResults = [];
+            for (const [keyword, elements] of Object.entries(matchResultsCache)) {
+                if (elements.length > 0) {
+                    // 处理正则表达式关键词
+                    let displayKeyword = keyword;
+                    if (keyword.startsWith('/') && keyword.length > 2) {
+                        const actualMatches = new Set();
+                        elements.forEach(elem => {
+                            const matches = extractMatches(elem.content, keyword);
+                            matches.forEach(match => actualMatches.add(match.text));
+                        });
+                        displayKeyword = Array.from(actualMatches).join(', ');
+                    }
 
-            if (interactiveElement) {
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        debouncedUpdate();
+                    matchedResults.push(`
+                        <div class="match-item">
+                            <span class="keyword" data-keyword="${keyword}">${escapeHtml(displayKeyword)}</span>：
+                            出现 <span class="count">${elements.length}</span> 次
+                        </div>
+                    `);
+                }
+            }
+
+            results.innerHTML = matchedResults.length > 0 ?
+                matchedResults.join('') :
+                '未找到匹配结果';
+
+            // 添加关键词点击事件处理
+            results.addEventListener('click', handleKeywordClick);
+            
+            // 显示结果
+            results.style.display = 'block';
+        } catch (error) {
+            console.error('更新匹配结果时发生错误:', error);
+            results.innerHTML = '更新匹配结果时发生错误';
+        }
+    }
+
+    // 添加关键词点击事件处理函数
+    function handleKeywordClick(event) {
+        const keywordElement = event.target.closest('.keyword');
+        if (keywordElement) {
+            event.stopPropagation();
+            const keyword = keywordElement.getAttribute('data-keyword');
+            findAndHighlight(keyword);
+        }
+    }
+
+    // 在 executeMatch 函数前添加 updateCounter 函数
+    function updateCounter() {
+        const keywords = getKeywords();
+        if (!keywords || keywords.length === 0) {
+            latestMatchResults = null;
+            return;
+        }
+
+        // 创建结果对象
+        const results = {};
+
+        // 获取所有可能包含文本的元素，但排除脚本创建的浮层
+        const selectors = [
+            FORM_SELECTORS.inputs,
+            FORM_SELECTORS.textAreas,
+            FORM_SELECTORS.contentEditable,
+            FORM_SELECTORS.textContainers,
+            FORM_SELECTORS.angularInputs
+        ].join(',');
+
+        // 获取元素时排除脚本创建的浮层
+        const excludeSelectors = [
+            '[data-script-element="true"]',
+            '[data-highlight-timer]'
+        ].join(',');
+
+        // 使用:not选择器排除脚本创建的元素
+        const elements = document.querySelectorAll(
+            `${selectors}:not(${excludeSelectors}):not(${excludeSelectors} *)`
+        );
+
+        // 遍历所有元素
+        elements.forEach(element => {
+            // 检查元素是否在脚本创建的浮层内
+            const isInScriptElement = element.closest('.keywords-dialog, .match-trigger, .match-results');
+            if (isInScriptElement) return;
+
+            const content = getTextContent(element);
+            if (!content) return;
+
+            // 遍历所有关键词
+            keywords.forEach(keyword => {
+                if (!keyword) return;
+
+                // 使用 extractMatches 获取匹配
+                const matches = extractMatches(content, keyword);
+                if (matches.length > 0) {
+                    if (!results[keyword]) {
+                        results[keyword] = [];
+                    }
+                    results[keyword].push({
+                        element,
+                        content,
+                        matches
                     });
-                });
-            }
-        }, { passive: true });
+                }
+            });
+        });
 
-        // 保留表单输入事件监听
-        document.body.addEventListener('input', (event) => {
-            const target = event.target;
-            if ((target instanceof HTMLInputElement ||
-                 target instanceof HTMLTextAreaElement) &&
-                !target.closest('.match-counter')) {
-                debouncedUpdate();
-            }
-        }, { passive: true });
+        // 更新全局匹配结果
+        latestMatchResults = results;
+    }
 
-        // 直接执行一次更新，不使用防抖
-        updateCounter();
+    // 执行匹配的函数
+    async function executeMatch() {
+        try {
+            // 执行匹配逻辑
+            updateCounter();
+            
+            // 将匹配结果保存到缓存
+            matchResultsCache = latestMatchResults;
+
+            // 如果没有找到匹配结果，返回 null
+            if (!matchResultsCache || Object.keys(matchResultsCache).length === 0) {
+                matchResultsCache = null;
+                return null;
+            }
+
+            return matchResultsCache;
+        } catch (error) {
+            console.error('执行匹配时发生错误:', error);
+            matchResultsCache = null;
+            return null;
+        }
     }
 
     function checkAndInit() {
@@ -1149,40 +1142,11 @@ function createNumberRegex(number) {
             GM_registerMenuCommand(title, handler);
         });
 
-        // 修改初始化逻辑
-        function initAndUpdate() {
-            init();
-
-            // 监听动态内容变化
-            const observer = new MutationObserver(debounce(() => {
-                updateCounter();
-            }, 1000));
-
-            // 观察 document.body 的子树变化
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                characterData: true
-            });
-        }
-
-        // 分阶段执行初始化
-        if (document.readyState === 'complete') {
-            // 页面已完全加载
-            setTimeout(initAndUpdate, 1000);
+        // 直接初始化，不需要分阶段
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
         } else {
-            // 等待 DOM 加载完成
-            document.addEventListener('DOMContentLoaded', () => {
-                setTimeout(initAndUpdate, 500);
-            });
-
-            // 等待页面完全加载
-            window.addEventListener('load', () => {
-                setTimeout(initAndUpdate, 1000);
-            });
-
-            // 额外等待动态内容
-            setTimeout(initAndUpdate, 2000);
+            init();
         }
     }
 
@@ -1193,4 +1157,123 @@ function createNumberRegex(number) {
         checkAndInit();
     }
 
-})();
+    // 添加缓存变量
+    let matchResultsCache = null;
+    let isResultsVisible = false;
+
+    matchResultsCache = null;
+
+    // 在 exportMatchedElements 函数之前添加这些函数
+    function getColorForClass(colorClass) {
+        const colors = {
+            'keyword-1': '#ffecb3',
+            'keyword-2': '#b3e5fc',
+            'keyword-3': '#c8e6c9',
+            'keyword-4': '#f8bbd0',
+            'keyword-5': '#d1c4e9'
+        };
+        return colors[colorClass] || '#fff3cd';
+    }
+
+    // 在 IIFE 顶部添加缓存变量
+    const highlightCache = new Map();
+
+    // 在 processHighlights 函数内添加缓存机制
+    function processHighlights(content, keywordsMap) {
+        // 添加缓存逻辑
+        const cacheKey = content + Array.from(keywordsMap.keys()).join(',');
+        if (highlightCache.has(cacheKey)) {
+            return highlightCache.get(cacheKey);
+        }
+
+        // 收集所有匹配结果并按长度降序排序
+        const allMatches = [];
+        
+        // 先按关键词长度降序排序，确保长的关键词优先匹配
+        const sortedKeywords = Array.from(keywordsMap.entries())
+            .sort((a, b) => b[0].length - a[0].length);
+
+        // 处理每个关键词
+        sortedKeywords.forEach(([keyword, matches], index) => {
+            const colorClass = `keyword-${(index % 5) + 1}`;
+            const keywordMatches = extractMatches(content, keyword);
+            keywordMatches.forEach(match => {
+                allMatches.push({
+                    ...match,
+                    colorClass,
+                    keyword,
+                    length: match.text.length,
+                    end: match.index + match.text.length
+                });
+            });
+        });
+
+        // 合并重叠的匹配
+        const mergedMatches = [];
+        const marked = new Set();
+
+        // 按起始位置和长度排序
+        allMatches.sort((a, b) => {
+            if (a.index === b.index) {
+                return b.length - a.length; // 相同位置，长的优先
+            }
+            return a.index - b.index;
+        });
+
+        // 处理重叠匹配
+        for (const match of allMatches) {
+            const matchRange = `${match.index}-${match.end}`;
+            
+            // 检查是否与任何已处理的匹配重叠
+            let shouldAdd = true;
+            for (const range of marked) {
+                const [start, end] = range.split('-').map(Number);
+                
+                // 完全包含或被包含
+                if ((match.index >= start && match.end <= end) ||
+                    (start >= match.index && end <= match.end)) {
+                    // 如果当前匹配更长，替换已有的
+                    if (match.length > (end - start)) {
+                        marked.delete(range);
+                    } else {
+                        shouldAdd = false;
+                    }
+                    break;
+                }
+                
+                // 部分重叠
+                if ((match.index < end && match.end > start) ||
+                    (start < match.end && end > match.index)) {
+                    // 选择更长的匹配
+                    if (match.length > (end - start)) {
+                        marked.delete(range);
+                    } else {
+                        shouldAdd = false;
+                    }
+                    break;
+                }
+            }
+
+            if (shouldAdd) {
+                marked.add(matchRange);
+                mergedMatches.push(match);
+            }
+        }
+
+        // 对内容进行HTML转义
+        let highlightedContent = escapeHtml(content);
+        
+        // 从后向前应用高亮，避免位置偏移
+        mergedMatches.sort((a, b) => b.index - a.index).forEach(match => {
+            const before = highlightedContent.substring(0, match.index);
+            const after = highlightedContent.substring(match.index + match.text.length);
+            
+            highlightedContent = `${before}<mark class="keyword-1">${match.text}</mark>${after}`;
+        });
+
+        // 保存到缓存
+        highlightCache.set(cacheKey, highlightedContent);
+        return highlightedContent;
+    }
+
+})()
