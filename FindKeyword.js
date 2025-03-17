@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         网页关键词查询工具高级版
+// @name         网页关键词查询工具普通版
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  统计表单中关键词的匹配次数
@@ -9,67 +9,13 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
+// @grant        window.onurlchange
+// @grant        window.focus
+// @grant        window.onblur
 // ==/UserScript==
 
-// 修改表单选择器配置,增加更多元素类型
-const FORM_SELECTORS = {
-    inputs: [
-        'input[type="text"]',
-        'input[type="search"]',
-        'input[type="email"]',
-        'input[type="tel"]',
-        'input[type="url"]',
-        'input[type="number"]',
-        'input[type="password"]'
-    ].join(','),
-    textAreas: 'textarea',
-    contentEditable: '[contenteditable="true"]',
-    // 增加常见文本容器
-    textContainers: [
-        'p',
-        'div',
-        'span',
-        'article',
-        'section',
-        'pre',
-        'code',
-        'label',
-        'h1',
-        'h2',
-        'h3',
-        'h4',
-        'h5',
-        'h6',
-        'li',
-        'td',
-        'th',
-        'caption',
-        'figcaption',
-        'blockquote',
-        'cite'
-    ].join(','),
-    angularInputs: [
-        '[nz-input]',
-        '[formControlName]',
-        '[ng-reflect-model]',
-        '[ng-model]',
-        '.ant-input',
-        '.ng-untouched',
-        '.ng-pristine',
-        'nz-form-control',
-        'nz-form-label'
-    ].join(',')
-};
-
-// 将配置常量合并和简化
-const CONFIG = {
-    STORAGE_KEYS: {
-        INCLUDE_DOMAINS: 'includeDomains',
-        EXCLUDE_DOMAINS: 'excludeDomains'
-    }
-};
-
-// 在文件顶部的常量定义区域后添加
+// 在脚本顶部添加
+let currentDialog = null;
 
 // HTML转义函数
 function escapeHtml(unsafe) {
@@ -94,6 +40,17 @@ function createNumberRegex(number) {
         // (?!) 和 (?=[^]) 是零宽负向前发断言
         `(?<!\\d)(?<!\\.)${number}(?!\\d)(?!\\.)`,
         'g'
+    );
+}
+
+// 在顶层添加 createNumberRegex 函数
+function createLetterRegex(letter) {
+    // 处理数字前后可能出现的字符类型
+    return new RegExp(
+        // (?<!) 和 (?<=[^]) 是零宽负向后发断言
+        // (?!) 和 (?=[^]) 是零宽负向前发断言
+        `(?<!\\S)${letter}(?!\\S)`,//单词边界没有任何字符
+        'gu' // 全局匹配+不忽略大小写+Unicode字符支持
     );
 }
 
@@ -135,6 +92,78 @@ function mergeOverlappingMatches(matches) {
 
 (function() {
     'use strict';
+
+    // 在脚本顶部添加全局状态标记
+    let isActiveTab = document.visibilityState === 'visible';
+    let isInitialized = false;
+    let isDialogOpen = false;
+
+    // 修改表单选择器配置,增加更多元素类型
+    const FORM_SELECTORS = {
+        inputs: [
+            'input[type="text"]',
+            'input[type="search"]',
+            'input[type="email"]',
+            'input[type="tel"]',
+            'input[type="url"]',
+            'input[type="number"]',
+            'input[type="password"]'
+        ].join(','),
+        textAreas: 'textarea',
+        contentEditable: '[contenteditable="true"]',
+        // 增加常见文本容器
+        textContainers: [
+            'p',
+            'span',
+            'article',
+            'section',
+            'pre',
+            'code',
+            'label',
+            'h1',
+            'h2',
+            'h3',
+            'h4',
+            'h5',
+            'h6',
+            'li',
+            'td',
+            'th',
+            'caption',
+            'figcaption',
+            'blockquote',
+            'cite'
+        ].join(','),
+        angularInputs: [
+            '[nz-input]',
+            '[formControlName]',
+            '[ng-reflect-model]',
+            '[ng-model]',
+            '.ant-input',
+            '.ng-untouched',
+            '.ng-pristine',
+            'nz-form-control',
+            // 增加排除逻辑：禁止 div 直系子元素的 nz-form-label
+            'nz-form-label:not(div nz-form-label)'  /* 空格表示任意层级嵌套 */
+        ].join(',')
+    };
+
+    // 将配置常量合并和简化
+    const CONFIG = {
+        STORAGE_KEYS: {
+            INCLUDE_DOMAINS: 'includeDomains',
+            EXCLUDE_DOMAINS: 'excludeDomains',
+            EXACT_KEYWORDS: 'exactKeywords',  // 新增
+            FUZZY_KEYWORDS: 'fuzzyKeywords'   // 新增
+        }
+    };
+
+
+    // 缓存必须在所有函数之前声明
+    const highlightCache = new Map();
+    let latestMatchResults = null;
+    let matchResultsCache = null;
+    let isResultsVisible = false;
 
     // 修改样式定义,添加导出按钮样式
     GM_addStyle(`
@@ -216,8 +245,8 @@ function mergeOverlappingMatches(matches) {
             position: fixed !important;
             right: 2vh !important;
             bottom: 2vh !important;
-            width: 6vh !important;
-            height: 6vh !important;
+            width: 8vh !important;
+            height: 8vh !important;
             border-radius: 50% !important;
             background: rgba(255, 255, 0, 0.8) !important;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
@@ -288,6 +317,65 @@ function mergeOverlappingMatches(matches) {
         }
     `);
 
+    function handleVisibilityChange() {
+        if (isDialogOpen) return; // 新增对话框状态判断
+        isActiveTab = document.visibilityState === 'visible';
+        toggleScriptState();
+    }
+
+
+    function handleWindowBlur() {
+        if (isDialogOpen) return; // 新增对话框状态判断
+        isActiveTab = false;
+        toggleScriptState();
+    }
+    
+    function handleWindowFocus() {
+        if (isDialogOpen) return; // 新增对话框状态判断
+        isActiveTab = true;
+        toggleScriptState();
+    }
+    
+    function toggleScriptState() {
+        if (isDialogOpen) return; // 新增：对话框打开时阻止状态切换
+
+        if (isActiveTab) {
+            if (!isInitialized) {
+                checkAndInit();
+                isInitialized = true;
+            }
+        } else {
+            cleanupScript();
+            isInitialized = false;
+        }
+    }
+    
+    // 新增清理函数
+    function cleanupScript() {
+        if (isDialogOpen) return; // 防止清理时误删对话框
+        // 移除所有脚本创建的DOM元素
+        document.querySelectorAll('[data-script-element]').forEach(el => el.remove());
+        
+        // 移除事件监听
+        if (window._keywordMatchObserver) {
+            window._keywordMatchObserver.disconnect();
+        }
+        
+        // 移除全局样式
+        const style = document.getElementById('tampermonkey-style');
+        if (style) style.remove();
+        
+        // 清除缓存
+        highlightCache.clear();
+        matchResultsCache = null;
+
+        // 清理 MutationObserver
+        if (window._keywordMatchObserver) {
+            window._keywordMatchObserver.disconnect();
+            delete window._keywordMatchObserver;
+        }        
+    }
+
     // 修改清理文本函数，只清理不可见字符
     function cleanText(text) {
         return text
@@ -297,19 +385,30 @@ function mergeOverlappingMatches(matches) {
     }
 
     // 关键词存储相关函数
-    function saveKeywords(keywords) {
-        GM_setValue('highlightKeywords', keywords.filter(k => k.length > 0));
-        highlightCache.clear(); // 清除缓存
+    function saveKeywords(exactKeywords, fuzzyKeywords) {
+        GM_setValue(CONFIG.STORAGE_KEYS.EXACT_KEYWORDS, exactKeywords);
+        GM_setValue(CONFIG.STORAGE_KEYS.FUZZY_KEYWORDS, fuzzyKeywords);
+        highlightCache.clear();
     }
-
+    
     function getKeywords() {
-        return GM_getValue('highlightKeywords', []);
+        return {
+            exact: GM_getValue(CONFIG.STORAGE_KEYS.EXACT_KEYWORDS, []),
+            fuzzy: GM_getValue(CONFIG.STORAGE_KEYS.FUZZY_KEYWORDS, [])
+        };
     }
 
     // 修改创建关键词设置对话框函数
     function createKeywordsDialog() {
+        // 在创建新对话框前清理旧元素
+        const existingDialogs = document.querySelectorAll('.keywords-dialog, [data-script-element="overlay"]');
+        existingDialogs.forEach(el => el.remove());
+
+        isDialogOpen = true; // 新增状态标记
+        let isClosing = false; // 新增关闭状态标记
+
         const overlay = document.createElement('div');
-        overlay.setAttribute('data-script-element', 'true');
+        overlay.setAttribute('data-script-element', 'overlay');
         overlay.style.cssText = `
             position: fixed;
             top: 0;
@@ -322,63 +421,97 @@ function mergeOverlappingMatches(matches) {
 
         const dialog = document.createElement('div');
         dialog.className = 'keywords-dialog';
-        dialog.setAttribute('data-script-element', 'true');
+        dialog.setAttribute('data-script-element', 'dialog');
 
         // 创建取消函数
         const closeDialog = () => {
-            document.body.removeChild(overlay);
-            document.body.removeChild(dialog);
-            // 移除全局函数
-            delete window.saveAndClose;
+            if (isClosing) return;
+            isClosing = true;
+
+            // 移除所有事件监听
+            document.removeEventListener('keydown', handleEsc);
+            overlay.removeEventListener('click', handleOverlayClick);
+
+            // 移除元素
+            if (document.body.contains(overlay)) document.body.removeChild(overlay);
+            if (document.body.contains(dialog)) document.body.removeChild(dialog);
+
+            isDialogOpen = false;
+            isClosing = false;
+            cleanupScript();
+            checkAndInit();
+
+            // 需要时重新初始化
+            //if (saved) {
+            //    cleanupScript();   // 清理旧元素和监听器    
+            //    checkAndInit();    // 重新检查域名并初始化
+            //}
         };
 
         dialog.innerHTML = `
-            <h3>设置关键词</h3>
-            <div style="margin-bottom: 10px; font-size: 12px; color: #666;">
-                <p>支持以下格式：</p>
-                <ul style="margin: 5px 0; padding-left: 20px;">
-                    <li>普通文本：直接输入要匹配的文字</li>
-                    <li>数字：输入纯数字将精确匹配</li>
-                </ul>
-                <p>每行输入一个关键词</p>
-            </div>
-            <textarea class="keywords-textarea" placeholder="请输入关键词，每行一个
-示例：
-关键词1
-123
-关键词2">${getKeywords().join('\n')}</textarea>
-            <div style="text-align: right">
-                <button class="cancel-btn">取消</button>
-                <button class="save-btn">保存</button>
-            </div>
+        <h3>设置关键词</h3>
+        <div style="margin-bottom: 10px; font-size: 12px; color: #666;">
+            <p>支持以下格式：</p>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>精确匹配：必须与文本内容完全一致</li>
+                <li>模糊匹配：包含关键词且包含其他内容</li>
+            </ul>
+            <p>每行输入一个关键词</p>
+        </div>
+        <div>
+            <label>精确匹配：</label>
+            <textarea class="keywords-textarea" id="exact-keywords">${getKeywords().exact.join('\n')}</textarea>
+        </div>
+        <div>
+            <label>模糊匹配：</label>
+            <textarea class="keywords-textarea" id="fuzzy-keywords">${getKeywords().fuzzy.join('\n')}</textarea>
+        </div>
+        <div style="text-align: right">
+            <button class="cancel-btn">取消</button>
+            <button class="save-btn">保存</button>
+        </div>
         `;
 
-        // 使用事件监听器替代内联onclick
-        dialog.querySelector('.cancel-btn').addEventListener('click', closeDialog);
-
-        dialog.querySelector('.save-btn').addEventListener('click', () => {
-            const textarea = dialog.querySelector('.keywords-textarea');
-            const keywords = textarea.value.split('\n').map(cleanText).filter(k => k.length > 0);
-            saveKeywords(keywords);
-            closeDialog();
-            updateCounter();
+        dialog.querySelector('.save-btn').addEventListener('click', (e) => {
+            e.stopPropagation(); // 新增：阻止事件冒泡
+            const exact = dialog.querySelector('#exact-keywords').value
+                .split('\n').map(cleanText).filter(k => k.length > 0);
+            const fuzzy = dialog.querySelector('#fuzzy-keywords').value
+                .split('\n').map(cleanText).filter(k => k.length > 0);
+            saveKeywords(exact, fuzzy);            
+            closeDialog(); // 传递保存标记
         });
 
-        // ESC键关闭对话框
-        const handleEsc = (event) => {
-            if (event.key === 'Escape') {
-                closeDialog();
-                document.removeEventListener('keydown', handleEsc);
+        // 修改取消按钮事件监听，阻止事件冒泡
+        dialog.querySelector('.cancel-btn').addEventListener('click', (e) => {
+            e.stopPropagation(); // 新增：阻止事件冒泡            
+            closeDialog(); // 传递保存标记
+        });        
+
+        // ESC处理函数
+        const handleEsc = (e) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation(); // 新增：阻止事件冒泡
+                e.preventDefault(); // 阻止默认行为
+                closeDialog(); // 传递保存标记                
             }
         };
-        document.addEventListener('keydown', handleEsc);
+        document.addEventListener('keydown', handleEsc, { once: true });
 
-        // 点击遮罩层关闭对话框
-        overlay.addEventListener('click', (event) => {
-            if (event.target === overlay) {
-                closeDialog();
+        // 遮罩层点击处理
+        const handleOverlayClick = (e) => {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                closeDialog(); // 传递保存标记
             }
-        });
+        };
+        overlay.addEventListener('click', handleOverlayClick, { once: true });
+
+        // 阻止对话框内容区域的点击冒泡
+        dialog.addEventListener('click', (e) => {
+            e.stopPropagation(); // 新增：阻止对话框内容区域的点击冒泡
+        //    closeDialog(); // 传递保存标记
+        });    
 
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
@@ -403,17 +536,28 @@ function mergeOverlappingMatches(matches) {
     function extractMatches(content, keyword) {
         let matches = [];
 
-        // 检查是否是数字
-        const isNumber = /^\d+(\.\d+)?$/.test(keyword);
-        if (isNumber) {
-            // 使用数字精确匹配
-            const regex = createNumberRegex(keyword);
-            let match;
-            while ((match = regex.exec(content)) !== null) {
-                matches.push({
-                    text: match[0],
-                    index: match.index
-                });
+        // 检查是否是纯数字或单个字母
+        const isNumberOrLetter = /^(?:\d+(?:\.\d+)?|[A-Za-z])$/.test(keyword);
+        if (isNumberOrLetter) {
+            let regex;
+
+            // 修改2：分离数字和字母的匹配逻辑
+            if (/^[A-Za-z]$/.test(keyword)) {
+                // 新增字母边界处理[5,9](@ref)
+                regex = createLetterRegex(keyword); // 单词边界+全局匹配+忽略大小写
+            } else {
+                // 使用数字精确匹配
+                regex = createNumberRegex(keyword);
+            }
+            // 修改3：添加安全校验
+            if (regex.global) {
+                let match;
+                while ((match = regex.exec(content)) !== null) {
+                    matches.push({
+                        text: match[0],
+                        index: match.index
+                    });
+                }
             }
         } else {
             // 普通文本匹配
@@ -432,7 +576,16 @@ function mergeOverlappingMatches(matches) {
     }
 
     // 修改 exportMatchedElements 函数，增加匹配内容高亮功能
-    function exportMatchedElements() {
+    function exportMatchedElements(bypassCheck = false) {
+        // 参数说明：
+        // - bypassCheck: 布尔值，默认为 false
+        //   true = 绕过激活状态检查
+        //   false = 需要检查激活状态
+        if (!bypassCheck && !isActiveTab) {
+            alert('请切换到当前标签页再执行导出');
+            return;
+        }
+
         try {
             if (!latestMatchResults || Object.keys(latestMatchResults).length === 0) {
                 alert('当前没有匹配结果可导出');
@@ -634,9 +787,9 @@ function mergeOverlappingMatches(matches) {
 
             // 按优先级获取值
             return element.getAttribute('ng-reflect-model') || // Angular 绑定值
-                element.getAttribute('value') ||            // 原生值
-                element.value ||                           // 当前值
-                element.textContent ||                     // 文本内容
+                element.getAttribute('value') ||// 原生值
+                element.value ||// 当前值
+                element.textContent ||// 文本内容
                 '';
         }
 
@@ -698,18 +851,10 @@ function mergeOverlappingMatches(matches) {
         return textContent.trim();
     }
 
-    // 在 createNumberRegex 函数后添加新的正则表达式验证函数
-    function isValidRegExp(pattern) {
-        try {
-            new RegExp(pattern);
-            return true;
-        } catch (e) {
-            return false;
-        }
-    }
 
     // 修改 findAndHighlight 函数
     function findAndHighlight(keyword) {
+        if (!isActiveTab) return; // 后台不执行高亮
         // 如果是新关键词，重置搜索状态
         if (currentSearchState.keyword !== keyword) {
             currentSearchState.keyword = keyword;
@@ -783,9 +928,10 @@ function mergeOverlappingMatches(matches) {
     };
 
     // 添加域名配置相关函数
-    function saveDomains(includeList, excludeList) {
-        GM_setValue(CONFIG.STORAGE_KEYS.INCLUDE_DOMAINS, includeList);
-        GM_setValue(CONFIG.STORAGE_KEYS.EXCLUDE_DOMAINS, excludeList);
+    function saveDomains(include, exclude) {
+        GM_setValue(CONFIG.STORAGE_KEYS.INCLUDE_DOMAINS, include.split('\n').map(s => s.trim()).filter(Boolean));
+        GM_setValue(CONFIG.STORAGE_KEYS.EXCLUDE_DOMAINS, exclude.split('\n').map(s => s.trim()).filter(Boolean));
+        highlightCache.clear();
     }
 
     function getDomains() {
@@ -796,7 +942,15 @@ function mergeOverlappingMatches(matches) {
     }
 
     function createDomainDialog() {
+        // 在创建新对话框前清理旧元素
+        const existingDialogs = document.querySelectorAll('.keywords-dialog, [data-script-element="overlay"]');
+        existingDialogs.forEach(el => el.remove());
+
+        isDialogOpen = true;
+        let isClosing = false; // 关闭状态锁
+
         const overlay = document.createElement('div');
+        overlay.setAttribute('data-script-element', 'overlay');
         overlay.style.cssText = `
             position: fixed;
             top: 0;
@@ -809,7 +963,34 @@ function mergeOverlappingMatches(matches) {
 
         const dialog = document.createElement('div');
         dialog.className = 'keywords-dialog';
+        dialog.setAttribute('data-script-element', 'dialog');
 
+
+        // 统一关闭处理函数
+        const closeDialog = () => {
+            if (isClosing) return;
+            isClosing = true;
+
+            // 移除所有事件监听
+            document.removeEventListener('keydown', handleEsc);
+            overlay.removeEventListener('click', handleOverlayClick);       
+            
+            // 安全移除元素
+            if (document.body.contains(overlay)) document.body.removeChild(overlay);
+            if (document.body.contains(dialog)) document.body.removeChild(dialog);
+
+            isDialogOpen = false;
+            isClosing = false;
+            cleanupScript();
+            checkAndInit();
+
+            // 需要时重新初始化
+            //if (saved) {
+            //    cleanupScript();
+            //    checkAndInit();
+            //}
+        };
+        
         const domains = getDomains();
 
         dialog.innerHTML = `
@@ -830,32 +1011,50 @@ function mergeOverlappingMatches(matches) {
             </div>
         `;
 
-        const closeDialog = () => {
-            document.body.removeChild(overlay);
-            document.body.removeChild(dialog);
-        };
 
-        dialog.querySelector('.cancel-btn').addEventListener('click', closeDialog);
-
-        dialog.querySelector('.save-btn').addEventListener('click', () => {
+        // 保存按钮
+        dialog.querySelector('.save-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
             const includeDomains = dialog.querySelector('#include-domains').value
-            .split('\n')
-            .map(d => d.trim())
-            .filter(Boolean);
-
+                .split('\n')
+                .map(d => d.trim())
+                .filter(Boolean);
             const excludeDomains = dialog.querySelector('#exclude-domains').value
-            .split('\n')
-            .map(d => d.trim())
-            .filter(Boolean);
-
+                .split('\n')
+                .map(d => d.trim())
+                .filter(Boolean);
             saveDomains(includeDomains, excludeDomains);
-            closeDialog();
-            checkAndInit(); // 重新检查并初始化
+            closeDialog(); // 传递保存标记
+        });
+    
+        // 取消按钮
+        dialog.querySelector('.cancel-btn').addEventListener('click', (e) => {
+            e.stopPropagation();            
+            closeDialog(); // 传递保存标记
         });
 
+        // ESC键处理
+        const handleEsc = (e) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                e.preventDefault();           
+                closeDialog(true); // 传递保存标记
+            }
+        };
+        document.addEventListener('keydown', handleEsc, { once: true });
+    
+        // 遮罩层点击处理
+        const handleOverlayClick = (e) => {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                closeDialog();  // 传递保存标记
+            }
+        };
+        overlay.addEventListener('click', handleOverlayClick, { once: true });
+        
         document.body.appendChild(overlay);
         document.body.appendChild(dialog);
-    }
+    }        
 
     // 优化域名检查函数
     function shouldRunOnDomain() {
@@ -880,11 +1079,17 @@ function mergeOverlappingMatches(matches) {
 
     // 修改启动逻辑相关函数
     function init() {
+        if (isDialogOpen) return; // 防止初始化冲突
+
+        // 先执行清理确保没有残留
+        cleanupScript();
+
         // 创建圆形触发器
         const trigger = document.createElement('div');
         trigger.className = 'match-trigger';
         trigger.setAttribute('data-script-element', 'true');
         trigger.innerHTML = '查看<br>关键词'; // 初始文本
+
         document.body.appendChild(trigger);
 
         // 创建结果显示区域（初始隐藏）
@@ -892,6 +1097,7 @@ function mergeOverlappingMatches(matches) {
         results.className = 'match-results';
         results.setAttribute('data-script-element', 'true');
         document.body.appendChild(results);
+
 
         // 点击触发器的处理函数
         trigger.addEventListener('click', async () => {
@@ -903,7 +1109,7 @@ function mergeOverlappingMatches(matches) {
             } else {
                 // 强制刷新匹配结果缓存
                 matchResultsCache = null;
-                highlightCache.clear();
+                highlightCache.clear();    
 
                 // 执行新的匹配
                 await executeMatch();
@@ -936,7 +1142,7 @@ function mergeOverlappingMatches(matches) {
 
         // 添加 MutationObserver 监听页面变化
         const observer = new MutationObserver(debounce(() => {
-            if (isResultsVisible) {
+            if (isActiveTab && isResultsVisible) { // 仅在前台时更新
                 // 清除缓存以强制重新匹配
                 matchResultsCache = null;
                 updateMatchResults();
@@ -971,17 +1177,19 @@ function mergeOverlappingMatches(matches) {
                 return;
             }
 
+            // 在 updateMatchResults 函数中
             const matchedResults = [];
-            for (const [keyword, elements] of Object.entries(matchResultsCache)) {
-                if (elements.length > 0) {
-                    matchedResults.push(`
-                        <div class="match-item">
-                            <span class="keyword" data-keyword="${escapeHtml(keyword)}">${escapeHtml(keyword)}</span>：
-                            出现 <span class="count">${elements.length}</span> 次
-                        </div>
-                    `);
-                }
-            }
+            Object.entries(matchResultsCache).forEach(([keyword, elements]) => {
+                const matchType = getKeywords().exact.includes(keyword) ? '（精确）' : '（模糊）';
+                matchedResults.push(`
+                    <div class="match-item">
+                        <span class="keyword" data-keyword="${escapeHtml(keyword)}">
+                            ${escapeHtml(keyword)}${matchType}
+                        </span>：
+                        出现 <span class="count">${elements.length}</span> 次
+                    </div>
+                `);
+            });
 
             results.innerHTML = matchedResults.length > 0 ?
                 matchedResults.join('') :
@@ -1007,8 +1215,8 @@ function mergeOverlappingMatches(matches) {
 
     // 在 executeMatch 函数前添加 updateCounter 函数
     function updateCounter() {
-        const keywords = getKeywords();
-        if (!keywords || keywords.length === 0) {
+        const { exact, fuzzy } = getKeywords();
+        if (!exact.length && !fuzzy.length) {
             latestMatchResults = null;
             return;
         }
@@ -1026,45 +1234,89 @@ function mergeOverlappingMatches(matches) {
         ].join(',');
 
         // 获取元素时排除脚本创建的浮层
+        // 修改后的排除选择器
         const excludeSelectors = [
-            '[data-script-element="true"]',
-            '[data-highlight-timer]'
+            '[data-script-element="true"]', // 直接排除脚本元素
+            '[data-script-element="true"] *', // 排除所有子元素
+            '.keywords-dialog',
+            '.keywords-dialog *',
+            '.match-trigger',
+            '.match-trigger *',
+            '.match-results',
+            '.match-results *'
         ].join(',');
 
         // 使用:not选择器排除脚本创建的元素
+        // 优化后的元素选择器
         const elements = document.querySelectorAll(
-            `${selectors}:not(${excludeSelectors}):not(${excludeSelectors} *)`
+            `${selectors}:not(${excludeSelectors})`
         );
 
-        // 遍历所有元素
+        // 获取元素的逻辑保持不变...
         elements.forEach(element => {
-            // 检查元素是否在脚本创建的浮层内
-            const isInScriptElement = element.closest('.keywords-dialog, .match-trigger, .match-results');
-            if (isInScriptElement) return;
+            // 深度检查元素层级
+            const isInScriptElement = element.closest(`
+                [data-script-element="true"], 
+                .keywords-dialog, 
+                .match-trigger, 
+                .match-results
+            `);
 
-            const content = getTextContent(element);
+            // 排除隐藏元素（添加新检查）
+            const isVisible = !!(
+                element.offsetWidth ||
+                element.offsetHeight ||
+                element.getClientRects().length
+            );
+
+            if (isInScriptElement || !isVisible) return;
+
+            const rawContent = getTextContent(element);
+            const content = cleanText(rawContent);
             if (!content) return;
 
-            // 遍历所有关键词
-            keywords.forEach(keyword => {
-                if (!keyword) return;
-
-                // 使用 extractMatches 获取匹配
-                const matches = extractMatches(content, keyword);
-                if (matches.length > 0) {
-                    if (!results[keyword]) {
-                        results[keyword] = [];
-                    }
+            // 处理精确匹配
+            exact.forEach(keyword => {
+                // 添加内容长度验证
+                if (content === keyword && content.length === keyword.length) {
+                    if (!results[keyword]) results[keyword] = [];
                     results[keyword].push({
                         element,
-                        content,
-                        matches
+                        content: rawContent,
+                        matches: [{ text: keyword, index: 0 }]
                     });
+                }
+            });
+
+            // 处理模糊匹配
+            fuzzy.forEach(keyword => {
+                if (content.includes(keyword) && content.length > keyword.length &&
+                // 添加相邻字符验证
+                !(
+                    content === keyword || 
+                    content.startsWith(keyword + " ") || 
+                    content.endsWith(" " + keyword) ||
+                    content.includes(" " + keyword + " ")
+                )
+            ) {
+                    const matches = [];
+                    let index = content.indexOf(keyword);
+                    while (index > -1) {
+                        matches.push({ text: keyword, index });
+                        index = content.indexOf(keyword, index + keyword.length);
+                    }
+                    if (matches.length) {
+                        if (!results[keyword]) results[keyword] = [];
+                        results[keyword].push({
+                            element,
+                            content: rawContent,
+                            matches
+                        });
+                    }
                 }
             });
         });
 
-        // 更新全局匹配结果
         latestMatchResults = results;
     }
 
@@ -1091,9 +1343,9 @@ function mergeOverlappingMatches(matches) {
         }
     }
 
-    function checkAndInit() {
+    function checkAndInit() { 
         if (!shouldRunOnDomain()) return;
-
+        
         const menuCommands = {
             '⚙️ 设置关键词': createKeywordsDialog,
             '🌐 配置网站': createDomainDialog,
@@ -1104,13 +1356,22 @@ function mergeOverlappingMatches(matches) {
             GM_registerMenuCommand(title, handler);
         });
 
-        // 直接初始化，不需要分阶段
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
-        }
+        // 延迟执行以确保DOM完全加载
+        setTimeout(() => {
+            if (document.readyState === 'complete') {
+                init();
+            } else {
+                window.addEventListener('load', init);
+            }
+        }, 300);
     }
+
+    /********************
+     * 初始化脚本执行 *
+     ​********************/
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
 
     // 修改启动脚本逻辑
     if (document.readyState === 'loading') {
@@ -1118,10 +1379,6 @@ function mergeOverlappingMatches(matches) {
     } else {
         checkAndInit();
     }
-
-    // 添加缓存变量
-    let matchResultsCache = null;
-    let isResultsVisible = false;
 
     matchResultsCache = null;
 
@@ -1137,8 +1394,6 @@ function mergeOverlappingMatches(matches) {
         return colors[colorClass] || '#fff3cd';
     }
 
-    // 在 IIFE 顶部添加缓存变量
-    const highlightCache = new Map();
 
     // 在 processHighlights 函数内添加缓存机制
     function processHighlights(content, keywordsMap) {
