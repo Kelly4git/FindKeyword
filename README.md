@@ -1,66 +1,110 @@
-# 网页关键词查询工具高级版
+# 网页关键词查询工具（普通版）
 
-## 📝 简介
-一个功能强大的网页关键词查询工具，可以实时统计和高亮显示网页中的关键词出现次数。支持动态内容、表单输入和 Angular 应用。
+![示例截图](screenshot.png) <!-- 可替换为实际截图文件路径 -->
 
-## ✨ 主要特性
-- 🔍 实时关键词匹配和统计
-- 🎯 支持精确数字匹配
-- 📑 多种文本元素类型支持
-- 🎨 关键词高亮显示
-- 📊 匹配结果导出功能
-- 🌐 域名白名单/黑名单
-- ⚡ 支持动态内容检测
-- 💪 兼容 Angular/Ant Design 表单
+一款Tampermonkey用户脚本，帮助快速在网页内容中查找、统计关键词，支持高亮匹配和结果导出。
 
-## 🚀 安装指南
+## 功能特性
 
-1. 首先安装一个用户脚本管理器:
-   - Chrome: [Tampermonkey](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-   - Firefox: [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/)
-   - Edge: [Tampermonkey](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
+- 🔍 **双模式匹配**  
+  支持精确匹配（完全一致）和模糊匹配（包含关键词）
+- 🎨 **智能高亮**  
+  动态高亮文本/表单元素中的匹配内容，支持过渡动画
+- 📊 **实时统计**  
+  悬浮统计面板显示关键词匹配次数，点击快速定位
+- 📥 **数据持久化**  
+  自动保存关键词配置和域名过滤规则
+- 🚀 **性能优化**  
+  采用缓存机制和智能DOM监控，减少性能消耗
+- 🌐 **域名过滤**  
+  支持包含/排除域名列表，精准控制生效范围
 
-2. 点击以下链接安装脚本:
-   [[安装脚本]](https://raw.githubusercontent.com/Kelly4git/FindKeyword/main/FindKeyword.js)
+## 安装使用
 
-3. 在弹出的用户脚本安装页面中点击"安装"按钮
+1. **安装脚本管理器**  
+   需先安装 [Tampermonkey](https://www.tampermonkey.net/) 扩展
 
-## 🎮 使用方法
+2. **安装用户脚本**  
+   [点击此处安装最新版本](https://github.com/Kelly4git/FindKeyword.git)
 
-### 设置关键词
-1. 点击浏览器扩展图标
-2. 选择"⚙️ 设置关键词"
-3. 在弹出窗口中输入关键词（每行一个）
-4. 点击"保存"
+3. **激活使用**  
+   - 点击页面右下角悬浮按钮激活
+   - 首次使用需在弹出窗口中设置关键词
 
-### 配置网站范围
-1. 点击浏览器扩展图标
-2. 选择"🌐 配置网站"
-3. 设置允许和排除的域名
-4. 点击"保存"
+## 使用指南
 
-### 导出匹配结果
-1. 点击浏览器扩展图标
-2. 选择"📥 导出匹配结果"
-3. 选择保存位置即可导出 HTML 格式的详细报告
+### 基本操作
+- 🟡 点击页面右下角黄色悬浮按钮触发搜索
+- 📝 右键点击悬浮按钮打开设置面板
+- 📌 双击统计项快速滚动到首个匹配位置
 
-## 🛠️ 功能说明
-- 支持实时统计页面中关键词出现次数
-- 点击关键词可高亮显示匹配内容
-- 支持导出详细的匹配结果报告
-- 可配置域名白名单和黑名单
-- 兼容动态加载的内容
-- 支持表单输入框的内容检测
+### 关键词设置
+```text
+精确匹配示例：
+12345
+ABC-100
 
-## 📋 更新日志
-- v1.0
-  - 初始版本发布
-  - 支持基础关键词查询功能
-  - 添加导出功能
-  - 支持域名配置
+模糊匹配示例：
+error
+payment_failed
+```
 
-## 🤝 贡献
-欢迎提交 Issue 和 Pull Request！
+### 高级功能
+- 🔄 动态内容监控（自动跟踪AJAX加载内容）
+- 🛡️ HTML特殊字符自动转义
+- 📤 支持html格式结果导出
+- 🎯 智能边界检测（避免数字/字母误匹配）
 
-## 📄 许可证
-[MIT License](LICENSE)
+## 配置选项
+
+### 域名过滤规则
+```javascript
+// 包含域名（白名单）
+*.example.com
+admin.*
+
+// 排除域名（黑名单）
+*.google.com
+dev.test.site
+```
+
+### 样式定制
+通过修改CSS变量自定义外观：
+```css
+:root {
+  --highlight-color: #ffeb3b;   /* 高亮底色 */
+  --outline-color: #ffc107;     /* 边框颜色 */
+  --trigger-bg: rgba(255,255,0,0.8); /* 悬浮按钮颜色 */
+}
+```
+
+## 注意事项
+
+1. **性能提示**  
+   在超大型页面（如无限滚动页）建议先过滤域名后使用
+
+2. **兼容性**  
+   支持现代浏览器（Chrome 90+/Firefox 85+）
+
+3. **冲突处理**  
+   如与其他高亮脚本冲突，可通过添加`data-script-element`属性排除
+
+## 开发支持
+
+欢迎贡献代码或提交问题：[Issues页面](your_github_issues_link)
+
+### 构建说明
+```bash
+npm install
+npm run build
+```
+
+## 授权协议
+
+[MIT License](LICENSE) © 2023 Your Name
+
+---
+
+> 提示：本工具仅用于辅助信息检索，请遵守网站使用条款，勿用于敏感数据采集。  
+> 项目更新频率：每月常规维护，重大漏洞24小时内响应。  
+> 遇到问题请先尝试清除脚本缓存，如仍未解决欢迎提交issue。
