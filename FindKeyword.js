@@ -1364,10 +1364,10 @@
 
         // 延迟执行以确保DOM完全加载
         setTimeout(() => {
-            if (document.readyState === 'complete') {
-                init();
+            if (document.readyState !== 'complete') {
+                window.addEventListener('load', init);                
             } else {
-                window.addEventListener('load', init);
+                init();
             }
         }, 300);
     }
@@ -1386,8 +1386,6 @@
     document.addEventListener('visibilitychange', boundHandlers.vis);
     window.addEventListener('blur', boundHandlers.blur);
     window.addEventListener('focus', boundHandlers.focus);
-
-
 
     // 修改启动脚本逻辑
     if (document.readyState === 'loading') {
